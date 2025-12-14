@@ -1,4 +1,4 @@
-package com.sonfusion.app
+package com.podcastcreateur.app
 
 import android.content.Intent
 import android.net.Uri
@@ -15,7 +15,7 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.recyclerview.widget.ItemTouchHelper
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
-import com.sonfusion.app.databinding.ActivityProjectBinding
+import com.podcastcreateur.app.databinding.ActivityProjectBinding
 import java.io.File
 import java.io.FileOutputStream
 import java.text.SimpleDateFormat
@@ -228,7 +228,7 @@ class ProjectActivity : AppCompatActivity() {
             Toast.makeText(this, "Aucun fichier à fusionner", Toast.LENGTH_SHORT).show()
             return
         }
-        val publicDir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC), "SonFusion")
+        val publicDir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC), "PodcastCreateur")
         if (!publicDir.exists()) publicDir.mkdirs()
 
         // 1. Nettoyage du nom de l'émission (Garde uniquement alphanumérique, points, tirets, underscores)
@@ -250,7 +250,7 @@ class ProjectActivity : AppCompatActivity() {
                 if (success) {
                     AlertDialog.Builder(this)
                         .setTitle("Fusion réussie !")
-                        .setMessage("Fichier sauvegardé dans :\nMusic/SonFusion/\n$outputName")
+                        .setMessage("Fichier sauvegardé dans :\nMusic/PodcastCreateur/\n$outputName")
                         .setPositiveButton("OK", null)
                         .show()
                 } else {
