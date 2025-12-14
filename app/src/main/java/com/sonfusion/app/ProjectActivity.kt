@@ -1,6 +1,5 @@
-package com.podcastcreateur.app
+package com.sonfusion.app
 
-import android.app.Activity
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
@@ -16,10 +15,13 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.recyclerview.widget.ItemTouchHelper
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
-import com.podcastcreateur.app.databinding.ActivityProjectBinding
+import com.sonfusion.app.databinding.ActivityProjectBinding
 import java.io.File
 import java.io.FileOutputStream
+import java.text.SimpleDateFormat
 import java.util.Collections
+import java.util.Date
+import java.util.Locale
 
 class ProjectActivity : AppCompatActivity() {
 
@@ -226,10 +228,18 @@ class ProjectActivity : AppCompatActivity() {
             Toast.makeText(this, "Aucun fichier à fusionner", Toast.LENGTH_SHORT).show()
             return
         }
-        val publicDir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC), "PodcastCreateur")
+        val publicDir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC), "SonFusion")
         if (!publicDir.exists()) publicDir.mkdirs()
 
-        val outputName = "${projectDir.name}_mix_${System.currentTimeMillis()}.wav"
+        // 1. Nettoyage du nom de l'émission (Garde uniquement alphanumérique, points, tirets, underscores)
+        val safeProjectName = projectDir.name.replace(Regex("[^a-zA-Z0-9._-]"), "_")
+        
+        // 2. Génération du timestamp (AnnéeMoisJour_HeureMinuteSeconde)
+        val sdf = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault())
+        val timestamp = sdf.format(Date())
+
+        // 3. Construction du nom final
+        val outputName = "${safeProjectName}_$timestamp.wav"
         val destFile = File(publicDir, outputName)
 
         Toast.makeText(this, "Fusion en cours...", Toast.LENGTH_SHORT).show()
@@ -240,7 +250,7 @@ class ProjectActivity : AppCompatActivity() {
                 if (success) {
                     AlertDialog.Builder(this)
                         .setTitle("Fusion réussie !")
-                        .setMessage("Fichier sauvegardé dans :\nMusic/PodcastCreateur/\n$outputName")
+                        .setMessage("Fichier sauvegardé dans :\nMusic/SonFusion/\n$outputName")
                         .setPositiveButton("OK", null)
                         .show()
                 } else {

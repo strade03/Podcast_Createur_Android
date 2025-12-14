@@ -32,42 +32,43 @@
         android:padding="8dp"
         android:gravity="center_vertical">
 
-        <!-- Bouton Enregistrer (Rond rouge) -->
-        <ImageButton
+        <!-- Bouton Enregistrer (Standard avec Texte) -->
+        <Button
             android:id="@+id/btnRecordNew"
-            android:layout_width="60dp"
-            android:layout_height="60dp"
-            android:src="@drawable/ic_record"
-            android:background="?selectableItemBackgroundBorderless"
-            android:scaleType="fitCenter"
-            android:padding="5dp"
-            android:layout_marginEnd="15dp"
-            android:contentDescription="Enregistrer"/>
-
-        <!-- Bouton Importer (Dossier) -->
-        <ImageButton
-            android:id="@+id/btnImportFile"
-            android:layout_width="50dp"
-            android:layout_height="50dp"
-            android:src="@drawable/ic_open_folder"
-            android:background="?selectableItemBackgroundBorderless"
-            android:scaleType="fitCenter"
-            android:padding="8dp"
-            android:layout_marginEnd="15dp"
-            android:contentDescription="Importer"/>
-            
-        <Space 
             android:layout_width="0dp"
             android:layout_height="wrap_content"
-            android:layout_weight="1"/>
+            android:layout_weight="1"
+            android:text="REC"
+            android:textColor="#FFFFFF"
+            android:backgroundTint="#D32F2F"
+            app:icon="@drawable/ic_record"
+            app:iconTint="#FFFFFF"
+            android:layout_marginEnd="4dp"/>
 
+        <!-- Bouton Importer (Standard avec Texte) -->
+        <Button
+            android:id="@+id/btnImportFile"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="IMPORT"
+            android:textColor="#FFFFFF"
+            android:backgroundTint="#1976D2"
+            app:icon="@drawable/ic_open_folder"
+            app:iconTint="#FFFFFF"
+            android:layout_marginStart="4dp"
+            android:layout_marginEnd="4dp"/>
+            
+        <!-- Bouton Exporter -->
         <Button
             android:id="@+id/btnMergeProject"
-            android:layout_width="wrap_content"
+            android:layout_width="0dp"
             android:layout_height="wrap_content"
-            android:text="EXPORTER"
+            android:layout_weight="1"
+            android:text="EXPORT"
             android:textColor="#FFF"
-            android:backgroundTint="#388E3C"/>
+            android:backgroundTint="#388E3C"
+            android:layout_marginStart="4dp"/>
     </LinearLayout>
 
     <TextView

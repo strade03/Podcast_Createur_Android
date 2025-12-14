@@ -8,7 +8,8 @@
     app:cardUseCompatPadding="true"
     android:backgroundTint="#FFFFFF">
 
-    
+        
+        
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
@@ -40,16 +41,20 @@
                 android:textColor="#757575"/>
         </LinearLayout>
 
-        <!-- Suppression du tint rouge moche, on utilise l'image originale -->
+        <!-- Correction Poubelle : Padding ajouté pour éviter le débordement -->
         <ImageButton
             android:id="@+id/btnDeleteProject"
             android:layout_width="48dp"
             android:layout_height="48dp"
+            android:padding="10dp"
+            android:scaleType="fitCenter"
             android:src="@drawable/ic_delete"
             android:background="?attr/selectableItemBackgroundBorderless"
             android:contentDescription="Supprimer" />
 
     </LinearLayout>
+
+    
 
     
 </androidx.cardview.widget.CardView>

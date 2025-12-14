@@ -8,3 +8,6 @@
 .externalNativeBuild
 .cxx
 local.properties
+# Fichiers locaux IA (ne jamais versionner)
+tmp_IA/
+create_synthese_file_for_IA.py
