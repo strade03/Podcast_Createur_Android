@@ -1,11 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
-    android:layout_width="match_parent"
-    android:layout_height="match_parent"
-    android:orientation="vertical"
-    android:background="#E0E0E0">
-
-    
+xmlns:app="http://schemas.android.com/apk/res-auto"
+android:layout_width="match_parent"
+android:layout_height="match_parent"
+android:orientation="vertical"
+android:background="#E0E0E0">
+        
     <!-- Header -->
     <LinearLayout
         android:layout_width="match_parent"
@@ -32,7 +32,7 @@
         android:padding="8dp"
         android:gravity="center_vertical">
 
-        <!-- Bouton Enregistrer (Standard avec Texte) -->
+        <!-- Bouton Enregistrer (Standard avec Texte et Icone Material) -->
         <Button
             android:id="@+id/btnRecordNew"
             android:layout_width="0dp"
@@ -43,9 +43,10 @@
             android:backgroundTint="#D32F2F"
             app:icon="@drawable/ic_record"
             app:iconTint="#FFFFFF"
-            android:layout_marginEnd="4dp"/>
+            android:layout_marginEnd="4dp"
+            style="@style/Widget.MaterialComponents.Button.Icon"/>
 
-        <!-- Bouton Importer (Standard avec Texte) -->
+        <!-- Bouton Importer (Standard avec Texte et Icone Material) -->
         <Button
             android:id="@+id/btnImportFile"
             android:layout_width="0dp"
@@ -57,7 +58,8 @@
             app:icon="@drawable/ic_open_folder"
             app:iconTint="#FFFFFF"
             android:layout_marginStart="4dp"
-            android:layout_marginEnd="4dp"/>
+            android:layout_marginEnd="4dp"
+            style="@style/Widget.MaterialComponents.Button.Icon"/>
             
         <!-- Bouton Exporter -->
         <Button
@@ -66,7 +68,7 @@
             android:layout_height="wrap_content"
             android:layout_weight="1"
             android:text="EXPORT"
-            android:textColor="#FFF"
+            android:textColor="#FFFFFF"
             android:backgroundTint="#388E3C"
             android:layout_marginStart="4dp"/>
     </LinearLayout>
@@ -87,6 +89,8 @@
         android:layout_weight="1"
         android:padding="8dp"
         android:clipToPadding="false"/>
+
+    
 
     
 
