@@ -12,6 +12,7 @@ import android.os.Bundle
 import android.os.SystemClock
 import android.view.ViewGroup
 import android.widget.EditText
+import android.widget.ImageButton // Import nécessaire
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
@@ -43,10 +44,11 @@ class RecorderActivity : AppCompatActivity() {
         }
     }
     
+    // ... promptForFileName() reste inchangé ...
     private fun promptForFileName() {
         val input = EditText(this)
         input.hint = "Nom de l'enregistrement"
-        input.setTextColor(Color.BLACK) // Texte en noir
+        input.setTextColor(Color.BLACK)
         input.setHintTextColor(Color.GRAY)
         
         val defaultName = "son_" + System.currentTimeMillis()/1000
@@ -86,8 +88,10 @@ class RecorderActivity : AppCompatActivity() {
         outputFile = File(projectPath, "999_" + customFileName + ".wav")
 
         isRecording = true
-        binding.btnRecordToggle.text = "STOP"
-        binding.btnRecordToggle.setBackgroundColor(getColor(R.color.black))
+        
+        // MODIFICATION ICI : Changement d'icone au lieu du texte
+        binding.btnRecordToggle.setImageResource(R.drawable.ic_stop)
+        
         binding.chronometer.base = SystemClock.elapsedRealtime()
         binding.chronometer.start()
 
@@ -97,6 +101,7 @@ class RecorderActivity : AppCompatActivity() {
         recordingThread?.start()
     }
 
+    // ... writeAudioDataToFile() reste inchangé ...
     private fun writeAudioDataToFile() {
         val sampleRate = WavUtils.RECORDER_SAMPLE_RATE
         val channels = AudioFormat.CHANNEL_IN_MONO
@@ -130,6 +135,8 @@ class RecorderActivity : AppCompatActivity() {
     private fun stopRecording() {
         isRecording = false
         binding.chronometer.stop()
+        // Remettre l'icone record
+        binding.btnRecordToggle.setImageResource(R.drawable.ic_record)
     }
 
     private fun onRecordingFinished() {
@@ -140,5 +147,10 @@ class RecorderActivity : AppCompatActivity() {
         finish()
     }
     
-    override fun onStop() { super.onStop(); isRecording = false }
+    override fun onStop() { 
+        super.onStop()
+        isRecording = false 
+        // Au cas où l'activité est stoppée par le système
+        try { binding.chronometer.stop() } catch (e:Exception){}
+    }
 }

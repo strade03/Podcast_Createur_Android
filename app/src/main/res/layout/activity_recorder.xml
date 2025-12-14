@@ -4,19 +4,25 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:gravity="center"
-    android:orientation="vertical">
+    android:orientation="vertical"
+    android:background="#FAFAFA">
 
     <Chronometer
         android:id="@+id/chronometer"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:textSize="48sp"/>
+        android:textSize="60sp"
+        android:textColor="#212121"
+        android:layout_marginBottom="50dp"/>
 
-    <Button
+    <!-- Remplacement par ImageButton pour afficher les icônes -->
+    <ImageButton
         android:id="@+id/btnRecordToggle"
-        android:layout_width="200dp"
-        android:layout_height="200dp"
-        android:text="REC"
-        android:textSize="32sp"
-        android:backgroundTint="#CC0000"/>
+        android:layout_width="150dp"
+        android:layout_height="150dp"
+        android:src="@drawable/ic_record"
+        android:background="?selectableItemBackgroundBorderless"
+        android:scaleType="fitCenter"
+        android:contentDescription="Enregistrer"/>
+        
 </LinearLayout>

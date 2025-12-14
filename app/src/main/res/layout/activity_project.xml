@@ -1,10 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
-xmlns:app="http://schemas.android.com/apk/res-auto"
-android:layout_width="match_parent"
-android:layout_height="match_parent"
-android:orientation="vertical"
-android:background="#E0E0E0">
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="#E0E0E0">
         
     <!-- Header -->
     <LinearLayout
@@ -24,7 +24,7 @@ android:background="#E0E0E0">
             android:textStyle="bold"/>
     </LinearLayout>
 
-    <!-- Toolbar Actions -->
+    <!-- Toolbar Actions : Boutons Textes Uniquement -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
@@ -32,45 +32,48 @@ android:background="#E0E0E0">
         android:padding="8dp"
         android:gravity="center_vertical">
 
-        <!-- Bouton Enregistrer (Standard avec Texte et Icone Material) -->
+        <!-- Bouton Enregistrer -->
         <Button
             android:id="@+id/btnRecordNew"
             android:layout_width="0dp"
-            android:layout_height="wrap_content"
+            android:layout_height="60dp"
             android:layout_weight="1"
-            android:text="REC"
+            android:text="Enregistrer"
+            android:textSize="13sp"
+            android:textStyle="bold"
             android:textColor="#FFFFFF"
             android:backgroundTint="#D32F2F"
-            app:icon="@drawable/ic_record"
-            app:iconTint="#FFFFFF"
             android:layout_marginEnd="4dp"
-            style="@style/Widget.MaterialComponents.Button.Icon"/>
+            app:cornerRadius="8dp"/>
 
-        <!-- Bouton Importer (Standard avec Texte et Icone Material) -->
+        <!-- Bouton Importer -->
         <Button
             android:id="@+id/btnImportFile"
             android:layout_width="0dp"
-            android:layout_height="wrap_content"
+            android:layout_height="60dp"
             android:layout_weight="1"
-            android:text="IMPORT"
+            android:text="Importer"
+            android:textSize="13sp"
+            android:textStyle="bold"
             android:textColor="#FFFFFF"
             android:backgroundTint="#1976D2"
-            app:icon="@drawable/ic_open_folder"
-            app:iconTint="#FFFFFF"
             android:layout_marginStart="4dp"
             android:layout_marginEnd="4dp"
-            style="@style/Widget.MaterialComponents.Button.Icon"/>
+            app:cornerRadius="8dp"/>
             
-        <!-- Bouton Exporter -->
+        <!-- Bouton Fusionner (anciennement Export) -->
         <Button
             android:id="@+id/btnMergeProject"
             android:layout_width="0dp"
-            android:layout_height="wrap_content"
+            android:layout_height="60dp"
             android:layout_weight="1"
-            android:text="EXPORT"
+            android:text="Fusionner"
+            android:textSize="13sp"
+            android:textStyle="bold"
             android:textColor="#FFFFFF"
             android:backgroundTint="#388E3C"
-            android:layout_marginStart="4dp"/>
+            android:layout_marginStart="4dp"
+            app:cornerRadius="8dp"/>
     </LinearLayout>
 
     <TextView
@@ -89,9 +92,5 @@ android:background="#E0E0E0">
         android:layout_weight="1"
         android:padding="8dp"
         android:clipToPadding="false"/>
-
-    
-
-    
 
 </LinearLayout>
