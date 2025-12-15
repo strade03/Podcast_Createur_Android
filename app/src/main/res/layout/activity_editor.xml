@@ -97,7 +97,7 @@
             android:id="@+id/btnReRecord" 
             android:layout_width="48dp" 
             android:layout_height="48dp" 
-            android:src="@drawable/ic_mic"
+            android:src="@drawable/ic_record"
             android:background="?attr/selectableItemBackgroundBorderless"
             android:scaleType="fitCenter"
             android:padding="10dp"
