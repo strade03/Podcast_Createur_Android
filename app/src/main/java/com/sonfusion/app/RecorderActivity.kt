@@ -44,14 +44,14 @@ class RecorderActivity : AppCompatActivity() {
         }
     }
     
-    // ... promptForFileName() reste inchangé ...
+
     private fun promptForFileName() {
         val input = EditText(this)
         input.hint = "Nom de l'enregistrement"
         input.setTextColor(Color.BLACK)
         input.setHintTextColor(Color.GRAY)
         
-        val defaultName = "son_" + System.currentTimeMillis()/1000
+        val defaultName = "Ma chronique_" + System.currentTimeMillis()/1000
         input.setText(defaultName)
 
         val container = android.widget.FrameLayout(this)
@@ -67,9 +67,14 @@ class RecorderActivity : AppCompatActivity() {
             .setTitle("Nouvel enregistrement")
             .setView(container)
             .setCancelable(false)
+            // Astuce pour le focus clavier
+            .setOnWindowFocusChangedListener { hasFocus ->
+                if (hasFocus) input.requestFocus()
+            }
             .setPositiveButton("OK") { _, _ ->
                 var name = input.text.toString().trim()
-                if (name.isEmpty()) name = defaultName
+                // Si l'utilisateur vide le champ, on remet une valeur par défaut avec timestamp pour éviter les bugs
+                if (name.isEmpty()) name = "son_" + System.currentTimeMillis()/1000
                 customFileName = name.replace(Regex("[^a-zA-Z0-9 _-]"), "")
             }
             .setNegativeButton("Annuler") { _, _ ->

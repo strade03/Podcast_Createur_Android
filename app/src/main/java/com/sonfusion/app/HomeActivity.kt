@@ -77,6 +77,8 @@ class HomeActivity : AppCompatActivity() {
 
     private fun showNewProjectDialog() {
         val input = EditText(this)
+        input.setText("Mon émission")
+        input.selectAll()
         input.hint = "Nom de l'émission"
         input.setTextColor(Color.BLACK) // Texte en noir
         input.setHintTextColor(Color.GRAY)
@@ -93,6 +95,10 @@ class HomeActivity : AppCompatActivity() {
         AlertDialog.Builder(this)
             .setTitle("Nouvelle émission")
             .setView(container)
+            // Pour que le clavier s'ouvre et que le focus soit mis (astuce UX)
+            .setOnWindowFocusChangedListener { hasFocus ->
+                if (hasFocus) input.requestFocus()
+            }
             .setPositiveButton("Créer") { _, _ ->
                 val name = input.text.toString().trim()
                 if (name.isNotEmpty()) {

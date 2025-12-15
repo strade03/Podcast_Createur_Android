@@ -1,5 +1,20 @@
-- Taille icone corbeille
+- Saisie du nom de l'émission et fichier : selectionner le nom par defaut pour eviter d'avoir a effacer
+
+- Faire Ajouter un enregistrement, ou on donne le nom et mettre la possibilité de mettre un texte (prompteur)
+=> on ajoute la ligne avec un lien sur l'edition du texte pour le prompteur et le bouton enregister pour créer le son.
+=> ne pas mettre les extensions dans le nom des enregistrement
+
+=> encodage utiliser MediaCodec + MediaExtractor à la place de ffmpegKit
+=> stocker en mp3 plutot qu'en wav !
+=> Exportation en mp3 
+=> pour l'importation filtrer les fichiers importables avec les formats supporté
+
 
 - Faire une banque de Jingle pour inserer dans la liste des fichier à fusionner (évite la duplication multiple) voir les format compatibles !
 => on à accès à la gestion de cette banque à l'accueil
 => Ajouter un bouton insertion jingle dans la partie gestion des fichiers
+
+
+Prompt à suivre :
+- Pour l'importation on ne va pas utiliser d'encodeur, on va copier le fichier tel quel mais on va filtrer en fonctionner des format supporté. 
+- On ne va plus utiliser ffmpeg mais plutot MediaCodec + MediaExtractor, et de préférence travailler en mp3 pour éviter d'occuper trop de place ? par contre pour l'affichage de l'onde dans l'édition il faudra le gérer)
