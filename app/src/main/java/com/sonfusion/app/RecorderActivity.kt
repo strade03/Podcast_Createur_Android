@@ -90,4 +90,4 @@ class RecorderActivity : AppCompatActivity() {
         super.onStop()
         if (isRecording) stopRecording()
     }
-}
+} 
