@@ -32,7 +32,7 @@
             android:textColor="#555"/>
     </LinearLayout>
 
-    <!-- Zone Waveform avec Scroll Horizontal pour le Zoom -->
+    <!-- Zone Waveform avec Scroll Horizontal -->
     <FrameLayout
         android:layout_width="match_parent"
         android:layout_height="0dp"
@@ -57,30 +57,6 @@
             android:layout_height="wrap_content"
             android:layout_gravity="center"
             android:visibility="gone"/>
-            
-        <!-- Boutons Zoom flottants semi-transparents -->
-        <LinearLayout
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:orientation="vertical"
-            android:layout_gravity="end|center_vertical"
-            android:background="#88FFFFFF"
-            android:layout_marginEnd="8dp"
-            android:padding="4dp">
-            
-            <ImageButton
-                android:id="@+id/btnZoomIn"
-                android:layout_width="40dp"
-                android:layout_height="40dp"
-                android:src="@drawable/ic_zoom_in"
-                android:background="?selectableItemBackgroundBorderless"/>
-            <ImageButton
-                android:id="@+id/btnZoomOut"
-                android:layout_width="40dp"
-                android:layout_height="40dp"
-                android:src="@drawable/ic_zoom_out"
-                android:background="?selectableItemBackgroundBorderless"/>
-        </LinearLayout>
     </FrameLayout>
 
     <!-- Barre d'outils -->
@@ -92,7 +68,7 @@
         android:gravity="center"
         android:background="#37474F">
 
-        <!-- Re-Enregistrer (Nouveau) -->
+        <!-- Re-Enregistrer -->
         <ImageButton 
             android:id="@+id/btnReRecord" 
             android:layout_width="48dp" 
@@ -103,8 +79,9 @@
             android:padding="10dp"
             android:tooltipText="Refaire l'enregistrement"/>
 
-        <View android:layout_width="1dp" android:layout_height="30dp" android:background="#55FFFFFF" android:layout_marginHorizontal="8dp"/>
+        <View android:layout_width="1dp" android:layout_height="30dp" android:background="#55FFFFFF" android:layout_marginHorizontal="6dp"/>
 
+        <!-- Lecture -->
         <ImageButton 
             android:id="@+id/btnPlay" 
             android:layout_width="48dp" 
@@ -114,8 +91,31 @@
             android:scaleType="fitCenter"
             android:padding="10dp"/>
 
-        <Space android:layout_width="8dp" android:layout_height="wrap_content"/>
+        <Space android:layout_width="6dp" android:layout_height="wrap_content"/>
 
+        <!-- Zoom Out -->
+        <ImageButton 
+            android:id="@+id/btnZoomOut" 
+            android:layout_width="48dp" 
+            android:layout_height="48dp" 
+            android:src="@drawable/ic_zoom_out"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:scaleType="fitCenter"
+            android:padding="10dp"/>
+            
+        <!-- Zoom In -->
+        <ImageButton 
+            android:id="@+id/btnZoomIn" 
+            android:layout_width="48dp" 
+            android:layout_height="48dp" 
+            android:src="@drawable/ic_zoom_in"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:scaleType="fitCenter"
+            android:padding="10dp"/>
+
+        <Space android:layout_width="6dp" android:layout_height="wrap_content"/>
+
+        <!-- Couper -->
         <ImageButton 
             android:id="@+id/btnCut" 
             android:layout_width="48dp" 
@@ -125,8 +125,7 @@
             android:scaleType="fitCenter"
             android:padding="10dp"/>
 
-        <Space android:layout_width="8dp" android:layout_height="wrap_content"/>
-
+        <!-- Normaliser -->
         <ImageButton 
             android:id="@+id/btnNormalize" 
             android:layout_width="48dp" 
@@ -136,8 +135,9 @@
             android:scaleType="fitCenter"
             android:padding="10dp"/>
 
-        <View android:layout_width="1dp" android:layout_height="30dp" android:background="#55FFFFFF" android:layout_marginHorizontal="8dp"/>
+        <View android:layout_width="1dp" android:layout_height="30dp" android:background="#55FFFFFF" android:layout_marginHorizontal="6dp"/>
 
+        <!-- Sauvegarder -->
         <ImageButton 
             android:id="@+id/btnSave" 
             android:layout_width="48dp" 

@@ -6,8 +6,6 @@ import android.media.AudioManager
 import android.media.AudioTrack
 import android.os.Bundle
 import android.view.View
-import android.view.ViewGroup
-import android.widget.HorizontalScrollView
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
@@ -49,7 +47,7 @@ class EditorActivity : AppCompatActivity() {
         binding.btnNormalize.setOnClickListener { normalizeSelection() }
         binding.btnSave.setOnClickListener { saveFile() }
         
-        // Gestion Zoom
+        // Gestion Zoom (Les boutons sont maintenant dans la toolbar)
         binding.btnZoomIn.setOnClickListener { applyZoom(zoomLevel * 1.5f) }
         binding.btnZoomOut.setOnClickListener { applyZoom(zoomLevel / 1.5f) }
         
@@ -59,17 +57,12 @@ class EditorActivity : AppCompatActivity() {
                 .setTitle("Refaire l'enregistrement ?")
                 .setMessage("L'audio actuel sera remplacé.")
                 .setPositiveButton("Oui") { _, _ ->
-                    // On relance RecorderActivity avec les bons paramètres
-                    // Il nous faut le prefix/nom. On les extrait du fichier ou on les passe en Intent si possible.
-                    // Ici on déduit du nom de fichier : "001_NomChronique.m4a"
                     val regex = Regex("^(\\d{3}_)(.*)\\.(.*)$")
                     val match = regex.find(currentFile.name)
                     
                     if (match != null) {
                         val (prefix, name, _) = match.destructured
                         val projectPath = currentFile.parent
-                        
-                        // Chercher le script associé
                         val scriptPath = File(projectPath, "$prefix$name.txt").absolutePath
                         
                         val intent = Intent(this, RecorderActivity::class.java)
@@ -78,7 +71,7 @@ class EditorActivity : AppCompatActivity() {
                         intent.putExtra("CHRONICLE_PREFIX", prefix)
                         intent.putExtra("SCRIPT_PATH", scriptPath)
                         startActivity(intent)
-                        finish() // On ferme l'éditeur actuel
+                        finish()
                     } else {
                          Toast.makeText(this, "Impossible de déterminer la chronique", Toast.LENGTH_SHORT).show()
                     }
@@ -120,9 +113,6 @@ class EditorActivity : AppCompatActivity() {
         }.start()
     }
     
-    // ... formatTime, playAudio, stopAudio, cut, normalize, save ...
-    // Code identique au précédent, je remets playAudio pour ajuster le scroll
-
     private fun formatTime(samples: Int): String {
         val sec = samples / 44100
         val m = sec / 60
@@ -133,7 +123,7 @@ class EditorActivity : AppCompatActivity() {
     private fun playAudio() {
         if (pcmData.isEmpty()) return
         isPlaying = true
-        binding.btnPlay.setImageResource(R.drawable.ic_pause) // ou ic_stop si pas d'icone pause
+        binding.btnPlay.setImageResource(R.drawable.ic_pause)
 
         Thread {
             val sampleRate = 44100
@@ -158,7 +148,7 @@ class EditorActivity : AppCompatActivity() {
                      runOnUiThread { 
                          binding.waveformView.playheadPos = offset
                          binding.waveformView.invalidate()
-                         autoScroll(offset) // Suivre la lecture
+                         autoScroll(offset)
                      }
                 }
             }
@@ -175,16 +165,13 @@ class EditorActivity : AppCompatActivity() {
         }.start()
     }
     
-    // Fait défiler le ScrollView pour que la tête de lecture reste visible
     private fun autoScroll(sampleIdx: Int) {
         val totalSamples = pcmData.size
         if (totalSamples == 0) return
         
-        // Position X de la tête de lecture dans la vue (qui peut être très large)
         val viewWidth = binding.waveformView.width
         val x = (sampleIdx.toFloat() / totalSamples) * viewWidth
         
-        // Centrer la vue sur X
         val screenCenter = screenWidth / 2
         val scrollX = (x - screenCenter).toInt()
         
@@ -195,7 +182,6 @@ class EditorActivity : AppCompatActivity() {
         isPlaying = false
     }
     
-    // Pour cut et normalize, c'est identique à avant
     private fun cutSelection() {
         val start = binding.waveformView.selectionStart
         val end = binding.waveformView.selectionEnd
@@ -217,7 +203,6 @@ class EditorActivity : AppCompatActivity() {
     }
 
     private fun normalizeSelection() {
-        // ... (Code identique)
          val start = if (binding.waveformView.selectionStart >= 0) binding.waveformView.selectionStart else 0
         val end = if (binding.waveformView.selectionEnd > start) binding.waveformView.selectionEnd else pcmData.size
 
