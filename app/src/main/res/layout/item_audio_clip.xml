@@ -52,7 +52,7 @@
                 android:textColor="#757575"/>
         </LinearLayout>
 
-        <!-- 1. Script (Toujours actif) -->
+        <!-- 1. Script -->
         <ImageButton 
             android:id="@+id/btnItemScript" 
             android:layout_width="44dp" 
@@ -76,19 +76,7 @@
             android:tooltipText="Enregistrer l'audio"
             android:contentDescription="Record"/>
 
-        <!-- 3. Éditer Audio (Visible seulement si audio existe) -->
-        <ImageButton 
-            android:id="@+id/btnItemEditAudio" 
-            android:layout_width="48dp" 
-            android:layout_height="48dp" 
-            android:padding="10dp"
-            android:scaleType="fitCenter"
-            android:src="@drawable/ic_edit" 
-            android:background="?selectableItemBackgroundBorderless" 
-            android:tooltipText="Couper/Monter"
-            android:contentDescription="Edit Audio"/>
-            
-        <!-- 4. Options / Supprimer -->
+        <!-- 3. Menu (Options) -->
         <ImageButton 
             android:id="@+id/btnItemMenu" 
             android:layout_width="48dp" 

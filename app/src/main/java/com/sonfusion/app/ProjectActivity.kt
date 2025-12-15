@@ -138,7 +138,7 @@ class ProjectActivity : AppCompatActivity() {
         val dialog = AlertDialog.Builder(this)
             .setTitle("Ajouter une chronique")
             .setView(container)
-            .setPositiveButton("Ajouter", null) // Null pour gérer manuellement
+            .setPositiveButton("Ajouter", null)
             .setNegativeButton("Annuler", null)
             .create()
 
@@ -146,7 +146,6 @@ class ProjectActivity : AppCompatActivity() {
         dialog.show()
         input.requestFocus()
 
-        // Gestion manuelle pour empêcher la fermeture si doublon
         dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
             val rawName = input.text.toString().trim()
             if (rawName.isEmpty()) {
@@ -156,18 +155,15 @@ class ProjectActivity : AppCompatActivity() {
 
             val safeName = rawName.replace(Regex("[^\\p{L}0-9 _-]"), "")
             
-            // 1. VÉRIFICATION DOUBLON
             val exists = chronicleList.any { it.name.equals(safeName, ignoreCase = true) }
             if (exists) {
                 Toast.makeText(this, "Une chronique porte déjà ce nom", Toast.LENGTH_SHORT).show()
-                // On ne ferme pas la fenêtre
             } else {
-                // Création
                 val index = chronicleList.size
                 val prefix = String.format("%03d_", index)
                 
                 val txtFile = File(projectDir, "$prefix$safeName.txt")
-                if (!txtFile.exists()) txtFile.writeText("") // Script vide par défaut
+                if (!txtFile.exists()) txtFile.writeText("")
                 
                 refreshList()
                 dialog.dismiss()
@@ -209,7 +205,6 @@ class ProjectActivity : AppCompatActivity() {
                 val extension = fileName.substringAfterLast('.', "mp3")
                 val cleanName = fileName.substringBeforeLast('.').replace(Regex("[^a-zA-Z0-9 ._-]"), "")
                 
-                // Vérif doublon (simple ajout d'un timestamp si doublon à l'import)
                 var finalName = cleanName
                 if (chronicleList.any { it.name.equals(finalName, ignoreCase = true) }) {
                     finalName += "_" + System.currentTimeMillis()
@@ -223,7 +218,6 @@ class ProjectActivity : AppCompatActivity() {
                     FileOutputStream(destAudio).use { output -> input.copyTo(output) }
                 }
                 
-                // 3. CRÉATION SCRIPT VIDE (ne rien écrire dedans)
                 if (!destScript.exists()) destScript.createNewFile()
 
                 runOnUiThread {
@@ -243,13 +237,11 @@ class ProjectActivity : AppCompatActivity() {
     }
 
     fun onRecord(item: Chronicle) {
-        // 2. CONFIRMATION ÉCRASEMENT
         if (item.audioFile != null && item.audioFile.exists()) {
             AlertDialog.Builder(this)
                 .setTitle("Ré-enregistrer ?")
                 .setMessage("Un enregistrement audio existe déjà pour '${item.name}'. Voulez-vous l'écraser ?")
                 .setPositiveButton("Oui, écraser") { _, _ ->
-                    // On supprime l'ancien avant de lancer l'activity
                     item.audioFile.delete() 
                     launchRecorder(item)
                 }
@@ -297,7 +289,6 @@ class ProjectActivity : AppCompatActivity() {
             .setPositiveButton("Renommer") { _, _ ->
                 val newName = input.text.toString().trim().replace(Regex("[^\\p{L}0-9 _-]"), "")
                 
-                // Vérif doublon aussi au renommage
                 if (chronicleList.any { it.name.equals(newName, ignoreCase = true) && it != item }) {
                     Toast.makeText(this, "Ce nom existe déjà", Toast.LENGTH_SHORT).show()
                 } else if (newName.isNotEmpty() && newName != item.name) {
@@ -355,7 +346,7 @@ class ChronicleAdapter(
         val txtStatus: TextView = v.findViewById(R.id.txtStatus)
         val btnScript: ImageButton = v.findViewById(R.id.btnItemScript)
         val btnRecord: ImageButton = v.findViewById(R.id.btnItemRecord)
-        val btnEditAudio: ImageButton = v.findViewById(R.id.btnItemEditAudio)
+        // btnEditAudio supprimé du layout et du VH
         val btnMenu: ImageButton = v.findViewById(R.id.btnItemMenu)
     }
 
@@ -374,20 +365,27 @@ class ChronicleAdapter(
         val audioStatus = if (hasAudio) "Audio OK" else "Pas d'audio"
         holder.txtStatus.text = "$scriptStatus • $audioStatus"
 
-        holder.btnEditAudio.visibility = if (hasAudio) View.VISIBLE else View.INVISIBLE
-        // Si on a déjà de l'audio, on peut afficher une icône différente (ex: retry) ou garder le micro
+        // Changement d'icône si audio présent (optionnel, ici on garde mic)
         holder.btnRecord.setImageResource(R.drawable.ic_record) 
 
         holder.btnScript.setOnClickListener { activity.onOpenScript(item) }
         holder.btnRecord.setOnClickListener { activity.onRecord(item) }
-        holder.btnEditAudio.setOnClickListener { activity.onEditAudio(item) }
         
+        // Configuration du Menu
         holder.btnMenu.setOnClickListener { 
             val popup = PopupMenu(activity, holder.btnMenu)
+            
+            // Ajout conditionnel de l'option "Éditer l'audio"
+            if (hasAudio) {
+                popup.menu.add("Éditer l'audio")
+            }
+            
             popup.menu.add("Renommer")
             popup.menu.add("Supprimer")
+            
             popup.setOnMenuItemClickListener { menuItem ->
                 when(menuItem.title) {
+                    "Éditer l'audio" -> activity.onEditAudio(item)
                     "Renommer" -> activity.onRename(item)
                     "Supprimer" -> activity.onDelete(item)
                 }
