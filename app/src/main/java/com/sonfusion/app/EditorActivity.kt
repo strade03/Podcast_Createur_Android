@@ -20,7 +20,6 @@ class EditorActivity : AppCompatActivity() {
     private lateinit var currentFile: File
     private var pcmData: ShortArray = ShortArray(0)
     
-    // IMPORTANT : Stocker la fréquence réelle du fichier (44100, 48000, etc)
     private var fileSampleRate = 44100 
     
     private var audioTrack: AudioTrack? = null
@@ -46,18 +45,15 @@ class EditorActivity : AppCompatActivity() {
         binding.btnNormalize.setOnClickListener { normalizeSelection() }
         binding.btnSave.setOnClickListener { saveFile() }
         
-        // ZOOM : On modifie le facteur et on l'envoie à la Vue
+        // ZOOM AMÉLIORÉ : Centré sur le pointeur de lecture
         binding.btnZoomIn.setOnClickListener { 
-            currentZoom = (currentZoom * 1.5f).coerceAtMost(20.0f)
-            binding.waveformView.setZoomLevel(currentZoom)
+            applyZoom(currentZoom * 1.5f)
         }
         binding.btnZoomOut.setOnClickListener { 
-            currentZoom = (currentZoom / 1.5f).coerceAtLeast(1.0f)
-            binding.waveformView.setZoomLevel(currentZoom)
+            applyZoom(currentZoom / 1.5f)
         }
         
         binding.btnReRecord.setOnClickListener {
-            // ... (Code identique à votre version, logique de ré-enregistrement)
              AlertDialog.Builder(this)
                 .setTitle("Refaire l'enregistrement ?")
                 .setMessage("L'audio actuel sera remplacé.")
@@ -82,13 +78,44 @@ class EditorActivity : AppCompatActivity() {
         }
     }
 
+    /**
+     * NOUVELLE FONCTION : Applique le zoom en gardant le pointeur centré
+     */
+    private fun applyZoom(newZoom: Float) {
+        val clampedZoom = newZoom.coerceIn(1.0f, 20.0f)
+        
+        // Calculer la position relative du pointeur AVANT le zoom
+        val oldWidth = binding.waveformView.width
+        val playheadRelativePos = if (oldWidth > 0 && pcmData.isNotEmpty()) {
+            binding.waveformView.playheadPos.toFloat() / pcmData.size
+        } else {
+            0.5f // Centre par défaut
+        }
+        
+        // Appliquer le nouveau zoom
+        currentZoom = clampedZoom
+        binding.waveformView.setZoomLevel(currentZoom)
+        
+        // Attendre que la vue soit re-mesurée, puis centrer sur le pointeur
+        binding.waveformView.post {
+            val newWidth = binding.waveformView.width
+            val screenWidth = resources.displayMetrics.widthPixels
+            
+            // Position X du pointeur dans la nouvelle vue
+            val playheadX = playheadRelativePos * newWidth
+            
+            // Scroll pour centrer le pointeur à l'écran
+            val targetScrollX = (playheadX - screenWidth / 2).toInt().coerceAtLeast(0)
+            binding.scroller.smoothScrollTo(targetScrollX, 0)
+        }
+    }
+
     private fun loadWaveform() {
         Thread {
             try {
-                // On récupère data + fréquence
                 val content = AudioHelper.decodeToPCM(currentFile)
                 pcmData = content.data
-                fileSampleRate = content.sampleRate // Sauvegarde de la fréquence
+                fileSampleRate = content.sampleRate
                 
                 runOnUiThread {
                     binding.waveformView.setWaveform(pcmData)
@@ -102,7 +129,6 @@ class EditorActivity : AppCompatActivity() {
     }
 
     private fun formatTime(samples: Int): String {
-        // Calcul du temps basé sur la fréquence réelle
         if (fileSampleRate == 0) return "00:00"
         val sec = samples / fileSampleRate
         val m = sec / 60
@@ -119,7 +145,7 @@ class EditorActivity : AppCompatActivity() {
             val minBuf = AudioTrack.getMinBufferSize(fileSampleRate, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT)
             audioTrack = AudioTrack(
                 AudioManager.STREAM_MUSIC, 
-                fileSampleRate, // UTILISATION DE LA VRAIE FRÉQUENCE
+                fileSampleRate,
                 AudioFormat.CHANNEL_OUT_MONO, 
                 AudioFormat.ENCODING_PCM_16BIT, 
                 minBuf, 
@@ -140,7 +166,6 @@ class EditorActivity : AppCompatActivity() {
                 audioTrack?.write(pcmData, offset, len)
                 offset += len
                 
-                // Rafraichissement UI adapté à la fréquence
                 if (offset % (fileSampleRate / 5) == 0) { 
                      runOnUiThread { 
                          binding.waveformView.playheadPos = offset
@@ -191,7 +216,6 @@ class EditorActivity : AppCompatActivity() {
     }
 
     private fun normalizeSelection() {
-        // ... Code identique ...
         val start = if (binding.waveformView.selectionStart >= 0) binding.waveformView.selectionStart else 0
         val end = if (binding.waveformView.selectionEnd > start) binding.waveformView.selectionEnd else pcmData.size
         var maxVal = 0
@@ -209,7 +233,6 @@ class EditorActivity : AppCompatActivity() {
     private fun saveFile() {
         binding.progressBar.visibility = View.VISIBLE
         Thread {
-            // IMPORTANT : On sauvegarde avec la même fréquence que l'original
             val success = AudioHelper.savePCMToAAC(pcmData, currentFile, fileSampleRate)
             runOnUiThread {
                 binding.progressBar.visibility = View.GONE
