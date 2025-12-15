@@ -1,4 +1,4 @@
-- Saisie du nom de l'émission et fichier : selectionner le nom par defaut pour eviter d'avoir a effacer
+
 
 - Faire Ajouter un enregistrement, ou on donne le nom et mettre la possibilité de mettre un texte (prompteur)
 => on ajoute la ligne avec un lien sur l'edition du texte pour le prompteur et le bouton enregister pour créer le son.
