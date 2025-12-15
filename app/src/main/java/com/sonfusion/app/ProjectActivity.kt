@@ -398,8 +398,10 @@ class ChronicleAdapter(
         
         val hasAudio = item.audioFile != null && item.audioFile.exists()
         val scriptLen = if (item.scriptFile.exists()) item.scriptFile.length() else 0
-        val statusText = if (hasAudio) "Audio OK" else "Pas d'audio"
-        holder.txtStatus.text = statusText
+        val scriptStatus = if (scriptLen > 0) "Script OK" else "Script vide"
+        val audioStatus = if (hasAudio) "Audio OK" else "Pas d'audio"
+        holder.txtStatus.text = "$scriptStatus • $audioStatus"
+
 
         // GESTION ICONE LECTURE / STOP / MICRO
         if (hasAudio) {
