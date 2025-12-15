@@ -356,7 +356,7 @@ class ChronicleAdapter(
         val btnScript: ImageButton = v.findViewById(R.id.btnItemScript)
         val btnRecord: ImageButton = v.findViewById(R.id.btnItemRecord)
         val btnEditAudio: ImageButton = v.findViewById(R.id.btnItemEditAudio)
-        val btnMenu: ImageButton = v.findViewById(R.id.btnItemMenu)
+        val btnMenu: ImageButton = v.findViewById(R.id.btnItemDelete)
     }
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): VH {
@@ -376,7 +376,7 @@ class ChronicleAdapter(
 
         holder.btnEditAudio.visibility = if (hasAudio) View.VISIBLE else View.INVISIBLE
         // Si on a déjà de l'audio, on peut afficher une icône différente (ex: retry) ou garder le micro
-        holder.btnRecord.setImageResource(R.drawable.ic_mic) 
+        holder.btnRecord.setImageResource(R.drawable.ic_record) 
 
         holder.btnScript.setOnClickListener { activity.onOpenScript(item) }
         holder.btnRecord.setOnClickListener { activity.onRecord(item) }
