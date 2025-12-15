@@ -28,10 +28,10 @@ class EditorActivity : AppCompatActivity() {
         val path = intent.getStringExtra("FILE_PATH")
         if (path == null) { finish(); return }
         currentFile = File(path)
-        // Affichage nom sans le préfixe
+        
         binding.txtFilename.text = currentFile.name.replace(Regex("^\\d{3}_"), "")
-
         binding.progressBar.visibility = View.VISIBLE
+        
         loadWaveform()
 
         binding.btnPlay.setOnClickListener { if(!isPlaying) playAudio() else stopAudio() }
@@ -40,11 +40,11 @@ class EditorActivity : AppCompatActivity() {
         binding.btnSave.setOnClickListener { saveFile() }
     }
 
-    // ... loadWaveform() et formatTime() inchangés ...
     private fun loadWaveform() {
         Thread {
             try {
-                val data = WavUtils.readWavData(currentFile)
+                // Utilisation de AudioHelper pour décoder (compatible m4a/mp3)
+                val data = AudioHelper.decodeToPCM(currentFile)
                 pcmData = data
                 runOnUiThread {
                     binding.waveformView.setWaveform(pcmData)
@@ -52,6 +52,7 @@ class EditorActivity : AppCompatActivity() {
                     binding.txtDuration.text = formatTime(pcmData.size)
                 }
             } catch (e: Exception) {
+                e.printStackTrace()
                 runOnUiThread { Toast.makeText(this, "Erreur lecture", Toast.LENGTH_SHORT).show() }
             }
         }.start()
@@ -76,21 +77,16 @@ class EditorActivity : AppCompatActivity() {
 
             audioTrack?.play()
 
-            // CORRECTION LECTURE : Priorité SelectionStart > Playhead > 0
             var startIdx = 0
             if (binding.waveformView.selectionStart >= 0) {
                 startIdx = binding.waveformView.selectionStart
             } else {
                 startIdx = binding.waveformView.playheadPos
             }
-            
-            // Sécurité bornes
             startIdx = startIdx.coerceIn(0, pcmData.size)
 
             val bufferSize = 2048
             var offset = startIdx
-            
-            // On joue jusqu'à la fin du fichier OU la fin de la sélection
             val endIdx = if (binding.waveformView.selectionEnd > startIdx) binding.waveformView.selectionEnd else pcmData.size
 
             while (isPlaying && offset < endIdx) {
@@ -98,7 +94,7 @@ class EditorActivity : AppCompatActivity() {
                 audioTrack?.write(pcmData, offset, len)
                 offset += len
                 
-                if (offset % 8820 == 0) { // Update ~5 fois par seconde
+                if (offset % 8820 == 0) { 
                      runOnUiThread { binding.waveformView.playheadPos = offset; binding.waveformView.invalidate() }
                 }
             }
@@ -109,7 +105,6 @@ class EditorActivity : AppCompatActivity() {
             isPlaying = false
             runOnUiThread { 
                 binding.btnPlay.setImageResource(R.drawable.ic_play) 
-                // Remettre le playhead au début de la zone lue si fini normalement
                 if (offset >= endIdx) binding.waveformView.playheadPos = startIdx
                 binding.waveformView.invalidate()
             }
@@ -120,7 +115,6 @@ class EditorActivity : AppCompatActivity() {
         isPlaying = false
     }
 
-    // ... Le reste (cut, normalize, save) reste identique ...
     private fun cutSelection() {
         val start = binding.waveformView.selectionStart
         val end = binding.waveformView.selectionEnd
@@ -164,9 +158,20 @@ class EditorActivity : AppCompatActivity() {
     }
 
     private fun saveFile() {
-         WavUtils.savePcmToWav(pcmData, currentFile)
-         Toast.makeText(this, "Sauvegardé", Toast.LENGTH_SHORT).show()
-         finish()
+        binding.progressBar.visibility = View.VISIBLE
+        Thread {
+            // Sauvegarde en AAC
+            val success = AudioHelper.savePCMToAAC(pcmData, currentFile)
+            runOnUiThread {
+                binding.progressBar.visibility = View.GONE
+                if (success) {
+                    Toast.makeText(this, "Sauvegardé", Toast.LENGTH_SHORT).show()
+                    finish()
+                } else {
+                    Toast.makeText(this, "Erreur sauvegarde", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }.start()
     }
     
     override fun onStop() {

@@ -1,3 +1,0 @@
-Origine :
-https://mvnrepository.com/artifact/com.antonkarpenko/ffmpeg-kit-min/2.1.0
-ffmpeg-kit-min-2.1.0

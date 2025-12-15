@@ -1,31 +1,26 @@
 package com.podcastcreateur.app
 
 import android.Manifest
-import android.annotation.SuppressLint
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Color
-import android.media.AudioFormat
-import android.media.AudioRecord
 import android.media.MediaRecorder
 import android.os.Bundle
 import android.os.SystemClock
 import android.view.ViewGroup
 import android.widget.EditText
-import android.widget.ImageButton // Import nécessaire
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import com.podcastcreateur.app.databinding.ActivityRecorderBinding
 import java.io.File
-import java.io.FileOutputStream
 
 class RecorderActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityRecorderBinding
     private var isRecording = false
-    private var recordingThread: Thread? = null
+    private var mediaRecorder: MediaRecorder? = null
     private lateinit var outputFile: File
     private lateinit var projectPath: String
     private var customFileName: String = ""
@@ -44,16 +39,15 @@ class RecorderActivity : AppCompatActivity() {
         }
     }
     
-
     private fun promptForFileName() {
         val input = EditText(this)
-        input.hint = "Nom de l'enregistrement"
+        input.hint = "Nom de la chronique"
         input.setTextColor(Color.BLACK)
         input.setHintTextColor(Color.GRAY)
         
-        val defaultName = "Ma chronique_" + System.currentTimeMillis()/1000
+        val defaultName = "Ma chronique"
         input.setText(defaultName)
-        input.selectAll() 
+        input.selectAll()
 
         val container = android.widget.FrameLayout(this)
         val params = android.widget.FrameLayout.LayoutParams(
@@ -65,104 +59,81 @@ class RecorderActivity : AppCompatActivity() {
         container.addView(input)
 
         val dialog = AlertDialog.Builder(this)
-            .setTitle("Nouvel enregistrement")
+            .setTitle("Nouvelle chronique")
             .setView(container)
             .setCancelable(false)
-            .setPositiveButton("OK", null) // Null ici
-            .setNegativeButton("Annuler") { _, _ ->
-                finish()
-            }
+            .setPositiveButton("OK", null)
+            .setNegativeButton("Annuler") { _, _ -> finish() }
             .create()
 
         dialog.window?.setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_STATE_VISIBLE)
-        
         dialog.show()
         input.requestFocus()
 
-        // GESTION MANUELLE DU BOUTON OK
         dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
             var name = input.text.toString().trim()
             if (name.isEmpty()) name = "son_" + System.currentTimeMillis()/1000
             
-            // Regex qui accepte les accents
+            // Regex avec accents supportés
             val safeName = name.replace(Regex("[^\\p{L}0-9 _-]"), "")
-            
-            // Vérification si le fichier existe déjà
-            val potentialFile = File(projectPath, "999_" + safeName + ".wav")
+            // Vérification si le fichier M4A existe
+            val potentialFile = File(projectPath, "999_" + safeName + ".m4a")
             
             if (potentialFile.exists()) {
-                 Toast.makeText(this, "Ce nom existe déjà dans l'émission", Toast.LENGTH_SHORT).show()
-                 // On ne fait rien d'autre, la fenêtre reste ouverte
+                 Toast.makeText(this, "Ce nom existe déjà", Toast.LENGTH_SHORT).show()
             } else {
                 customFileName = safeName
-                dialog.dismiss() // Tout est bon, on ferme
+                dialog.dismiss()
             }
         }
     }
 
-    @SuppressLint("MissingPermission")
     private fun startRecording() {
         if (ActivityCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
-            Toast.makeText(this, "Permission micro manquante", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "Permission manquante", Toast.LENGTH_SHORT).show()
             return
         }
 
-        outputFile = File(projectPath, "999_" + customFileName + ".wav")
+        outputFile = File(projectPath, "999_" + customFileName + ".m4a")
 
-        isRecording = true
-        
-        // MODIFICATION ICI : Changement d'icone au lieu du texte
-        binding.btnRecordToggle.setImageResource(R.drawable.ic_stop)
-        
-        binding.chronometer.base = SystemClock.elapsedRealtime()
-        binding.chronometer.start()
-
-        recordingThread = Thread {
-            writeAudioDataToFile()
-        }
-        recordingThread?.start()
-    }
-
-    // ... writeAudioDataToFile() reste inchangé ...
-    private fun writeAudioDataToFile() {
-        val sampleRate = WavUtils.RECORDER_SAMPLE_RATE
-        val channels = AudioFormat.CHANNEL_IN_MONO
-        val encoding = WavUtils.RECORDER_AUDIO_ENCODING
-        val minBufferSize = AudioRecord.getMinBufferSize(sampleRate, channels, encoding)
-        val bufferSize = minBufferSize * 2 
-        val recorder = AudioRecord(MediaRecorder.AudioSource.MIC, sampleRate, channels, encoding, bufferSize)
-        val data = ByteArray(bufferSize)
-
-        try {
-            recorder.startRecording()
-            val os = FileOutputStream(outputFile)
-            WavUtils.writeWavHeader(os, 0, 0, sampleRate, 1)
-            var totalBytes = 0L
-
-            while (isRecording) {
-                val read = recorder.read(data, 0, bufferSize)
-                if (read > 0) {
-                    os.write(data, 0, read)
-                    totalBytes += read
-                }
+        mediaRecorder = MediaRecorder().apply {
+            setAudioSource(MediaRecorder.AudioSource.MIC)
+            setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
+            setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
+            setAudioEncodingBitRate(128000)
+            setAudioSamplingRate(44100)
+            setOutputFile(outputFile.absolutePath)
+            
+            try {
+                prepare()
+                start()
+                isRecording = true
+                binding.btnRecordToggle.setImageResource(R.drawable.ic_stop)
+                binding.chronometer.base = SystemClock.elapsedRealtime()
+                binding.chronometer.start()
+            } catch (e: Exception) {
+                e.printStackTrace()
+                Toast.makeText(this@RecorderActivity, "Erreur initialisation enregistrement", Toast.LENGTH_SHORT).show()
             }
-            recorder.stop(); recorder.release(); os.close()
-            WavUtils.updateHeader(outputFile, totalBytes, sampleRate, 1)
-
-            runOnUiThread { onRecordingFinished() }
-
-        } catch (e: Exception) { e.printStackTrace() }
+        }
     }
 
     private fun stopRecording() {
+        try {
+            mediaRecorder?.stop()
+            mediaRecorder?.release()
+        } catch (e: Exception) { e.printStackTrace() }
+        
+        mediaRecorder = null
         isRecording = false
         binding.chronometer.stop()
-        // Remettre l'icone record
         binding.btnRecordToggle.setImageResource(R.drawable.ic_record)
+        
+        onRecordingFinished()
     }
 
     private fun onRecordingFinished() {
-        Toast.makeText(this, "Terminé", Toast.LENGTH_SHORT).show()
+        Toast.makeText(this, "Enregistré", Toast.LENGTH_SHORT).show()
         val intent = Intent(this, EditorActivity::class.java)
         intent.putExtra("FILE_PATH", outputFile.absolutePath)
         startActivity(intent)
@@ -171,8 +142,6 @@ class RecorderActivity : AppCompatActivity() {
     
     override fun onStop() { 
         super.onStop()
-        isRecording = false 
-        // Au cas où l'activité est stoppée par le système
-        try { binding.chronometer.stop() } catch (e:Exception){}
+        if (isRecording) stopRecording()
     }
 }

@@ -80,7 +80,7 @@ class HomeActivity : AppCompatActivity() {
         input.setText("Mon émission")
         input.selectAll()
         input.hint = "Nom de l'émission"
-        input.setTextColor(Color.BLACK) // Texte en noir
+        input.setTextColor(Color.BLACK) 
         input.setHintTextColor(Color.GRAY)
         
         val container = android.widget.FrameLayout(this)
@@ -95,34 +95,26 @@ class HomeActivity : AppCompatActivity() {
         val dialog = AlertDialog.Builder(this)
             .setTitle("Nouvelle émission")
             .setView(container)
-            // On met null ici pour gérer le clic nous-mêmes plus bas
             .setPositiveButton("Créer", null) 
             .setNegativeButton("Annuler", null)
             .create()
 
-        // Clavier visible
         dialog.window?.setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_STATE_VISIBLE)
-        
         dialog.show()
         input.requestFocus()
 
-        // GESTION DU BOUTON (pour empêcher la fermeture automatique)
         dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
             val name = input.text.toString().trim()
             if (name.isNotEmpty()) {
-                // MODIFICATION REGEX : \\p{L} accepte les caractères accentués (é, è, à...)
+                // Regex autorisant les accents
                 val safeName = name.replace(Regex("[^\\p{L}0-9 _-]"), "") 
-                
                 val projDir = File(rootDir, safeName)
                 if (projDir.exists()) {
-                    // Erreur : on affiche le message mais on NE ferme PAS la fenêtre
                     Toast.makeText(this, "Ce nom existe déjà", Toast.LENGTH_SHORT).show()
                 } else {
-                    // Succès : on crée et on ferme la fenêtre
                     projDir.mkdirs()
                     refreshList()
-                    dialog.dismiss() // Fermeture manuelle ici
-                    
+                    dialog.dismiss() 
                     val intent = Intent(this, ProjectActivity::class.java)
                     intent.putExtra("PROJECT_NAME", safeName)
                     startActivity(intent)
@@ -179,10 +171,8 @@ class HomeActivity : AppCompatActivity() {
         override fun onBindViewHolder(holder: VH, position: Int) {
             val dir = list[position]
             holder.txtName.text = dir.name
-            
             val sdf = SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault())
             holder.txtDate.text = "Modifié : " + sdf.format(Date(dir.lastModified()))
-
             holder.itemView.setOnClickListener { onItemClick(dir) }
             holder.btnDel.setOnClickListener { onDeleteClick(dir) }
         }

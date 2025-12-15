@@ -16,5 +16,13 @@
 
 
 Prompt à suivre :
+**************************************
 - Pour l'importation on ne va pas utiliser d'encodeur, on va copier le fichier tel quel mais on va filtrer en fonctionner des format supporté. 
 - On ne va plus utiliser ffmpeg mais plutot MediaCodec + MediaExtractor, et de préférence travailler en mp3 pour éviter d'occuper trop de place ? par contre pour l'affichage de l'onde dans l'édition il faudra le gérer)
+
+
+**************************************
+On va améliorer notre application.
+Comme c'est pour créer des émissions, on ne va non pas enregistrer mais créer un chronique 
+on lui applique un nom le fichier lié aura le même nom. Si on importe on aura le nom du fichier comme chronique mais avec la possibilité de la renommer.
+A la création on ajoute la ligne sans ouvrir l'enregistrement. On aura l'icone enregistrer (ic_record) et un nouvelle icone ic_edit_script qui sera le script textuel qui sera affiché lors de l'enregistrement pour aider à faire l'enregistrement.
