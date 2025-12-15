@@ -356,7 +356,7 @@ class ChronicleAdapter(
         val btnScript: ImageButton = v.findViewById(R.id.btnItemScript)
         val btnRecord: ImageButton = v.findViewById(R.id.btnItemRecord)
         val btnEditAudio: ImageButton = v.findViewById(R.id.btnItemEditAudio)
-        val btnMenu: ImageButton = v.findViewById(R.id.btnItemDelete)
+        val btnMenu: ImageButton = v.findViewById(R.id.btnItemMenu)
     }
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): VH {

@@ -90,14 +90,14 @@
             
         <!-- 4. Options / Supprimer -->
         <ImageButton 
-            android:id="@+id/btnItemDelete" 
+            android:id="@+id/btnItemMenu" 
             android:layout_width="48dp" 
             android:layout_height="48dp" 
             android:padding="10dp"
             android:scaleType="fitCenter"
-            android:src="@drawable/ic_delete" 
+            android:src="@drawable/ic_more" 
             android:background="?selectableItemBackgroundBorderless" 
-            android:contentDescription="Delete"/>            
+            android:contentDescription="More"/           
 
     </LinearLayout>
 </androidx.cardview.widget.CardView>
