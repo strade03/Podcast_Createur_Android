@@ -11,18 +11,19 @@ import kotlin.math.abs
 data class AudioContent(
     val data: ShortArray,
     val sampleRate: Int
-    )
+)
 
 data class AudioMetadata(
     val sampleRate: Int,
     val totalSamples: Long,
     val channelCount: Int,
-    val durationSeconds: Long
-    )
+    val durationUs: Long // CORRECTION : On utilise bien durationUs ici
+)
 
 object AudioHelper {
-// On veut environ 8000 points pour dessiner la courbe sur tout l'écran
-    private const val TARGET_WAVEFORM_POINTS = 8000
+    // On cible environ 8000 points pour dessiner la courbe sur la largeur de l'écran
+    private const val TARGET_WAVEFORM_POINTS = 8000 
+
     fun getAudioMetadata(input: File): AudioMetadata? {
         if (!input.exists()) return null
         
@@ -50,16 +51,22 @@ object AudioHelper {
         }
 
         val sampleRate = try { format.getInteger(MediaFormat.KEY_SAMPLE_RATE) } catch (e: Exception) { 44100 }
-        // Récupération précise de la durée
+        
+        // CORRECTION : Récupération précise en microsecondes
         val durationUs = try { format.getLong(MediaFormat.KEY_DURATION) } catch (e: Exception) { 0L }
+        
         val channelCount = try { format.getInteger(MediaFormat.KEY_CHANNEL_COUNT) } catch (e: Exception) { 1 }
         
+        // Calcul des samples totaux basé sur la durée précise
         val totalSamples = if (durationUs > 0) ((durationUs / 1_000_000.0) * sampleRate).toLong() else 0L
 
         extractor.release()
         return AudioMetadata(sampleRate, totalSamples, channelCount, durationUs)
     }
 
+    /**
+     * Charge une Waveform précise (Peak Detection).
+     */
     fun loadWaveformPreview(input: File): AudioContent {
         val metadata = getAudioMetadata(input) ?: return AudioContent(ShortArray(0), 44100)
         if (metadata.totalSamples == 0L) return AudioContent(ShortArray(0), metadata.sampleRate)
@@ -132,7 +139,6 @@ object AudioHelper {
                         val shorts = ShortArray(chunk.size / 2)
                         ByteBuffer.wrap(chunk).order(ByteOrder.LITTLE_ENDIAN).asShortBuffer().get(shorts)
                         
-                        // Algorithme Peak Detection
                         for (sample in shorts) {
                             val absSample = abs(sample.toInt())
                             if (absSample > currentMaxSample) {
