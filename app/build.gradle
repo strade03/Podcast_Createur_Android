@@ -48,5 +48,5 @@ dependencies {
     implementation 'androidx.activity:activity-ktx:1.8.2'
     implementation 'androidx.recyclerview:recyclerview:1.3.2'
     // FFmpeg Kit Local
-    implementation files('libs/ffmpeg-kit.aar')
+    implementation files('src/main/libs/ffmpeg-kit.aar')
 }
