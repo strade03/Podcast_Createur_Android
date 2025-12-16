@@ -12,12 +12,12 @@ data class AudioContent(
 
 object AudioHelper {
     private const val BIT_RATE = 128000
+    private const val MAX_SAMPLES = 44100 * 60 * 10 // 10 minutes max en mémoire
 
     /**
-     * Décode le fichier et renvoie les données MONO avec leur fréquence d'origine.
-     * CORRECTION : Gestion correcte du nombre de canaux (stéréo -> mono)
+     * Décode avec downsampling intelligent pour les gros fichiers
      */
-    fun decodeToPCM(input: File): AudioContent {
+    fun decodeToPCM(input: File, maxSamples: Int = MAX_SAMPLES): AudioContent {
         if (!input.exists()) return AudioContent(ShortArray(0), 44100)
         
         val extractor = MediaExtractor()
@@ -46,11 +46,30 @@ object AudioHelper {
             return AudioContent(ShortArray(0), 44100)
         }
 
-        // Récupération de la fréquence d'échantillonnage
         val sourceSampleRate = try {
             format.getInteger(MediaFormat.KEY_SAMPLE_RATE)
         } catch (e: Exception) {
             44100
+        }
+
+        // Estimer la durée pour calculer le downsampling
+        val durationUs = try {
+            format.getLong(MediaFormat.KEY_DURATION)
+        } catch (e: Exception) {
+            0L
+        }
+        
+        val estimatedSamples = if (durationUs > 0) {
+            ((durationUs / 1_000_000.0) * sourceSampleRate).toLong()
+        } else {
+            0L
+        }
+
+        // Calculer le facteur de downsampling si nécessaire
+        val downsampleFactor = if (estimatedSamples > maxSamples) {
+            (estimatedSamples / maxSamples).toInt().coerceAtLeast(1)
+        } else {
+            1
         }
 
         extractor.selectTrack(trackIndex)
@@ -67,13 +86,14 @@ object AudioHelper {
         val pcmData = java.io.ByteArrayOutputStream()
         
         var actualSampleRate = sourceSampleRate
-        var channelCount = 1  // NOUVEAU : On stocke le nombre de canaux
+        var channelCount = 1
+        var sampleCounter = 0 // Pour le downsampling
         
         try {
             var isEOS = false
             while (true) {
                 if (!isEOS) {
-                    val inIndex = decoder.dequeueInputBuffer(1000)
+                    val inIndex = decoder.dequeueInputBuffer(10000)
                     if (inIndex >= 0) {
                         val inBuffer = decoder.getInputBuffer(inIndex)
                         if (inBuffer != null) {
@@ -89,9 +109,8 @@ object AudioHelper {
                     }
                 }
 
-                val outIndex = decoder.dequeueOutputBuffer(bufferInfo, 1000)
+                val outIndex = decoder.dequeueOutputBuffer(bufferInfo, 10000)
                 
-                // CORRECTION : Capturer le nombre de canaux ET la fréquence
                 if (outIndex == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
                     val outputFormat = decoder.outputFormat
                     actualSampleRate = try {
@@ -112,7 +131,14 @@ object AudioHelper {
                         val chunk = ByteArray(bufferInfo.size)
                         outBuffer.get(chunk)
                         outBuffer.clear()
-                        pcmData.write(chunk)
+                        
+                        // Appliquer le downsampling
+                        if (downsampleFactor > 1) {
+                            val downsampled = downsampleChunk(chunk, downsampleFactor, channelCount)
+                            pcmData.write(downsampled)
+                        } else {
+                            pcmData.write(chunk)
+                        }
                     }
                     decoder.releaseOutputBuffer(outIndex, false)
                     if ((bufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) break
@@ -131,19 +157,50 @@ object AudioHelper {
         val shorts = ShortArray(bytes.size / 2)
         ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN).asShortBuffer().get(shorts)
         
-        // CORRECTION MAJEURE : Si c'est du stéréo, on convertit en mono
+        // Conversion stéréo -> mono si nécessaire
         val monoShorts = if (channelCount == 2) {
             convertStereoToMono(shorts)
         } else {
             shorts
         }
         
-        return AudioContent(monoShorts, actualSampleRate)
+        // Ajuster le sample rate si on a fait du downsampling
+        val finalSampleRate = if (downsampleFactor > 1) {
+            actualSampleRate / downsampleFactor
+        } else {
+            actualSampleRate
+        }
+        
+        return AudioContent(monoShorts, finalSampleRate)
     }
 
     /**
-     * NOUVELLE FONCTION : Convertit stéréo en mono (moyenne des 2 canaux)
+     * Downsampling d'un chunk de données PCM
      */
+    private fun downsampleChunk(data: ByteArray, factor: Int, channels: Int): ByteArray {
+        if (factor <= 1) return data
+        
+        val shorts = ShortArray(data.size / 2)
+        ByteBuffer.wrap(data).order(ByteOrder.LITTLE_ENDIAN).asShortBuffer().get(shorts)
+        
+        val samplesPerChannel = shorts.size / channels
+        val outputSamplesPerChannel = samplesPerChannel / factor
+        val output = ShortArray(outputSamplesPerChannel * channels)
+        
+        for (i in 0 until outputSamplesPerChannel) {
+            for (ch in 0 until channels) {
+                val srcIdx = (i * factor * channels) + ch
+                if (srcIdx < shorts.size) {
+                    output[i * channels + ch] = shorts[srcIdx]
+                }
+            }
+        }
+        
+        val outputBytes = ByteArray(output.size * 2)
+        ByteBuffer.wrap(outputBytes).order(ByteOrder.LITTLE_ENDIAN).asShortBuffer().put(output)
+        return outputBytes
+    }
+
     private fun convertStereoToMono(stereo: ShortArray): ShortArray {
         val mono = ShortArray(stereo.size / 2)
         for (i in mono.indices) {
@@ -154,9 +211,6 @@ object AudioHelper {
         return mono
     }
 
-    /**
-     * Interpolation linéaire pour changer la vitesse/fréquence
-     */
     private fun resample(input: ShortArray, currentRate: Int, targetRate: Int): ShortArray {
         if (currentRate == targetRate) return input
         
@@ -210,7 +264,7 @@ object AudioHelper {
 
             while (true) {
                 if (!isEOS) {
-                    val inIndex = encoder.dequeueInputBuffer(1000)
+                    val inIndex = encoder.dequeueInputBuffer(10000)
                     if (inIndex >= 0) {
                         val inBuffer = encoder.getInputBuffer(inIndex)
                         inBuffer?.clear()
@@ -229,7 +283,7 @@ object AudioHelper {
                     }
                 }
 
-                val outIndex = encoder.dequeueOutputBuffer(outputBufferInfo, 1000)
+                val outIndex = encoder.dequeueOutputBuffer(outputBufferInfo, 10000)
                 if (outIndex == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
                     val newFormat = encoder.outputFormat
                     audioTrackIndex = muxer.addTrack(newFormat)
@@ -257,10 +311,6 @@ object AudioHelper {
         }
     }
 
-    /**
-     * Fusion Intelligente : Prend la fréquence du premier fichier comme Maître.
-     * Si un fichier suivant a une fréquence différente, on le convertit.
-     */
     fun mergeFiles(inputs: List<File>, output: File): Boolean {
         if (inputs.isEmpty()) return false
         try {
@@ -269,21 +319,18 @@ object AudioHelper {
             var isFirst = true
             
             for (file in inputs) {
-                val content = decodeToPCM(file)
+                // Pour la fusion, on charge tout (mais on pourrait aussi optimiser ici)
+                val content = decodeToPCM(file, Int.MAX_VALUE)
                 
                 if (isFirst) {
-                    // Le premier fichier dicte la loi
                     masterSampleRate = content.sampleRate
                     for (s in content.data) allSamples.add(s)
                     isFirst = false
                 } else {
-                    // Les suivants doivent s'adapter
                     if (content.sampleRate != masterSampleRate) {
-                        // On convertit pour matcher le maitre
                         val resampledData = resample(content.data, content.sampleRate, masterSampleRate)
                         for (s in resampledData) allSamples.add(s)
                     } else {
-                        // Fréquence identique, on ajoute direct
                         for (s in content.data) allSamples.add(s)
                     }
                 }

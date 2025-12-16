@@ -6,7 +6,6 @@ import android.media.AudioManager
 import android.media.AudioTrack
 import android.os.Bundle
 import android.view.View
-import android.widget.HorizontalScrollView
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
@@ -25,6 +24,14 @@ class EditorActivity : AppCompatActivity() {
     private var audioTrack: AudioTrack? = null
     private var isPlaying = false
     private var currentZoom = 1.0f
+    
+    // Flag pour savoir si on a chargé en mode dégradé
+    private var isDownsampled = false
+
+    companion object {
+        private const val LARGE_FILE_THRESHOLD = 50 * 1024 * 1024 // 50 Mo
+        private const val WARNING_THRESHOLD = 100 * 1024 * 1024 // 100 Mo
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -36,16 +43,15 @@ class EditorActivity : AppCompatActivity() {
         currentFile = File(path)
         
         binding.txtFilename.text = currentFile.name.replace(Regex("^\\d{3}_"), "")
-        binding.progressBar.visibility = View.VISIBLE
         
-        loadWaveform()
+        // Vérifier la taille du fichier AVANT de charger
+        checkFileSizeAndLoad()
 
         binding.btnPlay.setOnClickListener { if(!isPlaying) playAudio() else stopAudio() }
         binding.btnCut.setOnClickListener { cutSelection() }
         binding.btnNormalize.setOnClickListener { normalizeSelection() }
         binding.btnSave.setOnClickListener { saveFile() }
         
-        // ZOOM AMÉLIORÉ : Centré sur le pointeur de lecture
         binding.btnZoomIn.setOnClickListener { 
             applyZoom(currentZoom * 1.5f)
         }
@@ -78,42 +84,73 @@ class EditorActivity : AppCompatActivity() {
         }
     }
 
-    /**
-     * NOUVELLE FONCTION : Applique le zoom en gardant le pointeur centré
-     */
+    private fun checkFileSizeAndLoad() {
+        val fileSizeMb = currentFile.length() / (1024 * 1024)
+        
+        when {
+            currentFile.length() > WARNING_THRESHOLD -> {
+                // Fichier très gros : avertir l'utilisateur
+                AlertDialog.Builder(this)
+                    .setTitle("Fichier volumineux")
+                    .setMessage("Ce fichier fait ${fileSizeMb} Mo. Le chargement peut prendre du temps et la qualité sera réduite pour l'affichage.\n\nContinuer ?")
+                    .setPositiveButton("Oui") { _, _ ->
+                        isDownsampled = true
+                        loadWaveform()
+                    }
+                    .setNegativeButton("Annuler") { _, _ ->
+                        finish()
+                    }
+                    .setCancelable(false)
+                    .show()
+            }
+            currentFile.length() > LARGE_FILE_THRESHOLD -> {
+                // Fichier gros : charger en mode dégradé sans demander
+                isDownsampled = true
+                Toast.makeText(this, "Fichier volumineux : chargement optimisé", Toast.LENGTH_LONG).show()
+                loadWaveform()
+            }
+            else -> {
+                // Fichier normal
+                loadWaveform()
+            }
+        }
+    }
+
     private fun applyZoom(newZoom: Float) {
         val clampedZoom = newZoom.coerceIn(1.0f, 20.0f)
         
-        // Calculer la position relative du pointeur AVANT le zoom
         val oldWidth = binding.waveformView.width
         val playheadRelativePos = if (oldWidth > 0 && pcmData.isNotEmpty()) {
             binding.waveformView.playheadPos.toFloat() / pcmData.size
         } else {
-            0.5f // Centre par défaut
+            0.5f
         }
         
-        // Appliquer le nouveau zoom
         currentZoom = clampedZoom
         binding.waveformView.setZoomLevel(currentZoom)
         
-        // Attendre que la vue soit re-mesurée, puis centrer sur le pointeur
         binding.waveformView.post {
             val newWidth = binding.waveformView.width
             val screenWidth = resources.displayMetrics.widthPixels
-            
-            // Position X du pointeur dans la nouvelle vue
             val playheadX = playheadRelativePos * newWidth
-            
-            // Scroll pour centrer le pointeur à l'écran
             val targetScrollX = (playheadX - screenWidth / 2).toInt().coerceAtLeast(0)
             binding.scroller.smoothScrollTo(targetScrollX, 0)
         }
     }
 
     private fun loadWaveform() {
+        binding.progressBar.visibility = View.VISIBLE
+        
         Thread {
             try {
-                val content = AudioHelper.decodeToPCM(currentFile)
+                val content = if (isDownsampled) {
+                    // Charger avec limitation de samples
+                    AudioHelper.decodeToPCM(currentFile, 44100 * 60 * 10) // Max 10 minutes
+                } else {
+                    // Charger normalement
+                    AudioHelper.decodeToPCM(currentFile, Int.MAX_VALUE)
+                }
+                
                 pcmData = content.data
                 fileSampleRate = content.sampleRate
                 
@@ -121,9 +158,26 @@ class EditorActivity : AppCompatActivity() {
                     binding.waveformView.setWaveform(pcmData)
                     binding.progressBar.visibility = View.GONE
                     binding.txtDuration.text = formatTime(pcmData.size)
+                    
+                    if (isDownsampled) {
+                        Toast.makeText(this, "Mode aperçu : qualité réduite pour l'affichage", Toast.LENGTH_LONG).show()
+                    }
+                }
+            } catch (e: OutOfMemoryError) {
+                runOnUiThread {
+                    binding.progressBar.visibility = View.GONE
+                    AlertDialog.Builder(this)
+                        .setTitle("Fichier trop volumineux")
+                        .setMessage("Ce fichier est trop gros pour être édité sur cet appareil. Utilisez un logiciel sur ordinateur comme Audacity.")
+                        .setPositiveButton("OK") { _, _ -> finish() }
+                        .show()
                 }
             } catch (e: Exception) {
-                runOnUiThread { Toast.makeText(this, "Erreur lecture", Toast.LENGTH_SHORT).show() }
+                e.printStackTrace()
+                runOnUiThread {
+                    binding.progressBar.visibility = View.GONE
+                    Toast.makeText(this, "Erreur de chargement", Toast.LENGTH_SHORT).show()
+                }
             }
         }.start()
     }
@@ -203,6 +257,11 @@ class EditorActivity : AppCompatActivity() {
         val start = binding.waveformView.selectionStart
         val end = binding.waveformView.selectionEnd
         if (start < 0 || end <= start) return
+        
+        if (isDownsampled) {
+            Toast.makeText(this, "Édition impossible en mode aperçu", Toast.LENGTH_LONG).show()
+            return
+        }
 
         AlertDialog.Builder(this).setTitle("Couper ?").setPositiveButton("Oui") { _, _ ->
              val newPcm = ShortArray(pcmData.size - (end - start))
@@ -216,6 +275,11 @@ class EditorActivity : AppCompatActivity() {
     }
 
     private fun normalizeSelection() {
+        if (isDownsampled) {
+            Toast.makeText(this, "Édition impossible en mode aperçu", Toast.LENGTH_LONG).show()
+            return
+        }
+        
         val start = if (binding.waveformView.selectionStart >= 0) binding.waveformView.selectionStart else 0
         val end = if (binding.waveformView.selectionEnd > start) binding.waveformView.selectionEnd else pcmData.size
         var maxVal = 0
@@ -231,6 +295,11 @@ class EditorActivity : AppCompatActivity() {
     }
 
     private fun saveFile() {
+        if (isDownsampled) {
+            Toast.makeText(this, "Sauvegarde impossible en mode aperçu", Toast.LENGTH_LONG).show()
+            return
+        }
+        
         binding.progressBar.visibility = View.VISIBLE
         Thread {
             val success = AudioHelper.savePCMToAAC(pcmData, currentFile, fileSampleRate)
