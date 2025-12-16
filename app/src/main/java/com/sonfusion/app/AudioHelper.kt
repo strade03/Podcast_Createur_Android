@@ -338,10 +338,12 @@ object AudioHelper {
                                     }
                                     
                                     // Lire l'output de l'encodeur
-                                    drainEncoder(encoder, muxer, outputBufferInfo, audioTrackIndex, muxerStarted) { track, started ->
+                                    val (newTrack, newStarted) = drainEncoder(encoder, muxer, outputBufferInfo, audioTrackIndex, muxerStarted) { track, started ->
                                         audioTrackIndex = track
                                         muxerStarted = started
                                     }
+                                    audioTrackIndex = newTrack
+                                    muxerStarted = newStarted
                                 }
                             }
                             decoder.releaseOutputBuffer(outIndex, false)
@@ -403,35 +405,41 @@ object AudioHelper {
         trackIndex: Int,
         started: Boolean,
         onTrackAdded: (Int, Boolean) -> Unit
-    ) {
+    ): Pair<Int, Boolean> {
         var currentTrack = trackIndex
         var currentStarted = started
         
-        while (true) {
+        var shouldContinue = true
+        while (shouldContinue) {
             val outIndex = encoder.dequeueOutputBuffer(bufferInfo, 0)
-            if (outIndex == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
-                if (!currentStarted) {
-                    val format = encoder.outputFormat
-                    currentTrack = muxer.addTrack(format)
-                    muxer.start()
-                    currentStarted = true
-                    onTrackAdded(currentTrack, currentStarted)
+            when {
+                outIndex == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> {
+                    if (!currentStarted) {
+                        val format = encoder.outputFormat
+                        currentTrack = muxer.addTrack(format)
+                        muxer.start()
+                        currentStarted = true
+                        onTrackAdded(currentTrack, currentStarted)
+                    }
                 }
-            } else if (outIndex >= 0) {
-                val encodedData = encoder.getOutputBuffer(outIndex)
-                if ((bufferInfo.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG) != 0) {
-                    bufferInfo.size = 0
+                outIndex >= 0 -> {
+                    val encodedData = encoder.getOutputBuffer(outIndex)
+                    if ((bufferInfo.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG) != 0) {
+                        bufferInfo.size = 0
+                    }
+                    if (bufferInfo.size != 0 && currentStarted) {
+                        encodedData?.position(bufferInfo.offset)
+                        encodedData?.limit(bufferInfo.offset + bufferInfo.size)
+                        muxer.writeSampleData(currentTrack, encodedData!!, bufferInfo)
+                    }
+                    encoder.releaseOutputBuffer(outIndex, false)
                 }
-                if (bufferInfo.size != 0 && currentStarted) {
-                    encodedData?.position(bufferInfo.offset)
-                    encodedData?.limit(bufferInfo.offset + bufferInfo.size)
-                    muxer.writeSampleData(currentTrack, encodedData!!, bufferInfo)
+                else -> {
+                    shouldContinue = false
                 }
-                encoder.releaseOutputBuffer(outIndex, false)
-            } else {
-                break
             }
         }
+        return Pair(currentTrack, currentStarted)
     }
 
     // Ancienne fonction gardée pour compatibilité mais non recommandée
