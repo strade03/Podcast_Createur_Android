@@ -263,15 +263,17 @@ class ProjectActivity : AppCompatActivity() {
             return
         }
         
-        // UI Loading
+        // Créer un dialogue avec barre de progression
         val progressView = layoutInflater.inflate(R.layout.dialog_progress, null)
         val progressBar = progressView.findViewById<android.widget.ProgressBar>(R.id.progressBar)
         val progressText = progressView.findViewById<android.widget.TextView>(R.id.progressText)
-        progressBar.isIndeterminate = true // FFmpeg ne donne pas de % facile en concat copy
-        progressText.text = "Fusion ultra-rapide en cours..."
+        
+        progressBar.max = 100
+        progressBar.progress = 0
+        progressText.text = "Préparation..."
         
         val progressDialog = AlertDialog.Builder(this)
-            .setTitle("Export")
+            .setTitle("Export en cours...")
             .setView(progressView)
             .setCancelable(false)
             .create()
@@ -287,11 +289,17 @@ class ProjectActivity : AppCompatActivity() {
         
         val sdf = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault())
         val timestamp = sdf.format(Date())
-        val outputName = "${safeProjectName}_$timestamp.m4a" // M4A/AAC standard
+        val outputName = "${safeProjectName}_$timestamp.m4a"
         val destFile = File(publicDir, outputName)
         
-        // Appel à FFmpegHelper
-        FFmpegHelper.mergeAudioFiles(filesToMerge, destFile) { success ->
+        Thread {
+            val success = AudioHelper.mergeFilesStreaming(filesToMerge, destFile) { progress ->
+                runOnUiThread {
+                    progressBar.progress = progress
+                    progressText.text = "Fusion en cours... $progress%"
+                }
+            }
+            
             runOnUiThread {
                 progressDialog.dismiss()
                 if (success) {
@@ -301,10 +309,10 @@ class ProjectActivity : AppCompatActivity() {
                         .setPositiveButton("OK", null)
                         .show()
                 } else {
-                    Toast.makeText(this, "Erreur lors de l'export FFmpeg", Toast.LENGTH_LONG).show()
+                    Toast.makeText(this, "Erreur lors de l'export", Toast.LENGTH_LONG).show()
                 }
             }
-        }
+        }.start()
     }
 
     // --- ACTIONS CLASSIQUES ---
