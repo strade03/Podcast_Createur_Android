@@ -161,7 +161,58 @@ class EditorActivity : AppCompatActivity() {
         binding.btnPlay.setImageResource(R.drawable.ic_stop_read)
 
         playbackJob = lifecycleScope.launch(Dispatchers.IO) {
+            var extractor: MediaExtractor? = null
+            var decoder: MediaCodec? = null
+            
             try {
+                extractor = MediaExtractor()
+                extractor.setDataSource(currentFile.absolutePath)
+                
+                var trackIndex = -1
+                var format: MediaFormat? = null
+                
+                for (i in 0 until extractor.trackCount) {
+                    val f = extractor.getTrackFormat(i)
+                    val mime = f.getString(MediaFormat.KEY_MIME)
+                    if (mime?.startsWith("audio/") == true) {
+                        trackIndex = i
+                        format = f
+                        break
+                    }
+                }
+                
+                if (trackIndex < 0 || format == null) {
+                    withContext(Dispatchers.Main) {
+                        Toast.makeText(this@EditorActivity, "Format audio non supporté", Toast.LENGTH_SHORT).show()
+                    }
+                    return@launch
+                }
+                
+                // Positionnement au début de la sélection si applicable
+                var startSample = if (binding.waveformView.selectionStart >= 0) {
+                    binding.waveformView.selectionStart
+                } else {
+                    binding.waveformView.playheadPos
+                }
+                
+                val endSample = if (binding.waveformView.selectionEnd > startSample) {
+                    binding.waveformView.selectionEnd
+                } else {
+                    meta.totalSamples.toInt()
+                }
+                
+                // Convertir en temps
+                val startMs = (startSample * 1000L) / meta.sampleRate
+                extractor.selectTrack(trackIndex)
+                extractor.seekTo(startMs * 1000, MediaExtractor.SEEK_TO_CLOSEST_SYNC)
+                
+                // Créer le décodeur
+                val mime = format.getString(MediaFormat.KEY_MIME) ?: return@launch
+                decoder = MediaCodec.createDecoderByType(mime)
+                decoder.configure(format, null, null, 0)
+                decoder.start()
+                
+                // Créer l'AudioTrack
                 val minBuf = AudioTrack.getMinBufferSize(
                     meta.sampleRate,
                     AudioFormat.CHANNEL_OUT_MONO,
@@ -176,62 +227,105 @@ class EditorActivity : AppCompatActivity() {
                     minBuf,
                     AudioTrack.MODE_STREAM
                 )
-
-                audioTrack?.play()
-
-                val content = AudioHelper.decodeToPCM(currentFile)
-                val pcmData = content.data
                 
-                var startIdx = if (binding.waveformView.selectionStart >= 0) {
-                    binding.waveformView.selectionStart
-                } else {
-                    binding.waveformView.playheadPos
-                }
-                startIdx = startIdx.coerceIn(0, pcmData.size)
-
-                val bufferSize = 4096
-                var offset = startIdx
-                val endIdx = if (binding.waveformView.selectionEnd > startIdx) {
-                    binding.waveformView.selectionEnd
-                } else {
-                    pcmData.size
-                }
-
-                // CORRECTION: Mise à jour plus fréquente du pointeur
-                val updateInterval = meta.sampleRate / 20 // 20 fois par seconde
+                audioTrack?.play()
+                
+                val bufferInfo = MediaCodec.BufferInfo()
+                var currentSample = startSample
+                val updateInterval = meta.sampleRate / 20 // 20 Hz
                 var samplesSinceUpdate = 0
-
-                while (isPlaying && offset < endIdx) {
-                    val len = minOf(bufferSize, endIdx - offset)
-                    audioTrack?.write(pcmData, offset, len)
-                    offset += len
-                    samplesSinceUpdate += len
-                    
-                    // Mise à jour du pointeur à intervalles réguliers
-                    if (samplesSinceUpdate >= updateInterval) {
-                        samplesSinceUpdate = 0
-                        withContext(Dispatchers.Main) {
-                            binding.waveformView.playheadPos = offset
-                            binding.waveformView.invalidate()
-                            autoScroll(offset)
+                var isInputDone = false
+                
+                // Boucle de décodage/lecture streaming
+                while (isPlaying && currentSample < endSample) {
+                    // Feed input
+                    if (!isInputDone) {
+                        val inIndex = decoder.dequeueInputBuffer(10000)
+                        if (inIndex >= 0) {
+                            val inBuffer = decoder.getInputBuffer(inIndex)
+                            if (inBuffer != null) {
+                                val sampleSize = extractor.readSampleData(inBuffer, 0)
+                                val sampleTime = extractor.sampleTime / 1000 // µs -> ms
+                                val sampleTimeMs = sampleTime
+                                val endMs = (endSample * 1000L) / meta.sampleRate
+                                
+                                if (sampleSize < 0 || sampleTimeMs >= endMs) {
+                                    decoder.queueInputBuffer(
+                                        inIndex, 0, 0, 0,
+                                        MediaCodec.BUFFER_FLAG_END_OF_STREAM
+                                    )
+                                    isInputDone = true
+                                } else {
+                                    decoder.queueInputBuffer(
+                                        inIndex, 0, sampleSize,
+                                        extractor.sampleTime, 0
+                                    )
+                                    extractor.advance()
+                                }
+                            }
                         }
                     }
+                    
+                    // Get output
+                    val outIndex = decoder.dequeueOutputBuffer(bufferInfo, 10000)
+                    if (outIndex >= 0) {
+                        val outBuffer = decoder.getOutputBuffer(outIndex)
+                        if (outBuffer != null && bufferInfo.size > 0) {
+                            // Lire les samples
+                            val tempArray = ShortArray(bufferInfo.size / 2)
+                            outBuffer.order(ByteOrder.LITTLE_ENDIAN)
+                            outBuffer.asShortBuffer().get(tempArray)
+                            
+                            // Jouer l'audio
+                            audioTrack?.write(tempArray, 0, tempArray.size)
+                            
+                            // Mettre à jour la position
+                            currentSample += tempArray.size
+                            samplesSinceUpdate += tempArray.size
+                            
+                            if (samplesSinceUpdate >= updateInterval) {
+                                samplesSinceUpdate = 0
+                                withContext(Dispatchers.Main) {
+                                    binding.waveformView.playheadPos = currentSample.coerceIn(0, meta.totalSamples.toInt())
+                                    binding.waveformView.invalidate()
+                                    autoScroll(currentSample)
+                                }
+                            }
+                        }
+                        
+                        decoder.releaseOutputBuffer(outIndex, false)
+                        
+                        if (bufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) {
+                            break
+                        }
+                    } else if (outIndex == MediaCodec.INFO_TRY_AGAIN_LATER) {
+                        if (isInputDone) break
+                    }
                 }
-
+                
                 // Dernière mise à jour
                 withContext(Dispatchers.Main) {
-                    binding.waveformView.playheadPos = offset
+                    binding.waveformView.playheadPos = currentSample
                     binding.waveformView.invalidate()
                 }
-
-                audioTrack?.stop()
-                audioTrack?.release()
-                audioTrack = null
                 
             } catch (e: Exception) {
                 e.printStackTrace()
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(this@EditorActivity, "Erreur lecture: ${e.message}", Toast.LENGTH_SHORT).show()
+                }
             } finally {
-                // CORRECTION: S'assurer que l'état est bien réinitialisé
+                try {
+                    audioTrack?.stop()
+                    audioTrack?.release()
+                    audioTrack = null
+                    decoder?.stop()
+                    decoder?.release()
+                    extractor?.release()
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
+                
                 isPlaying = false
                 withContext(Dispatchers.Main) {
                     binding.btnPlay.setImageResource(R.drawable.ic_play)
@@ -240,7 +334,7 @@ class EditorActivity : AppCompatActivity() {
             }
         }
     }
-    
+
     private fun autoScroll(sampleIdx: Int) {
         val meta = metadata ?: return
         val viewWidth = binding.waveformView.width
