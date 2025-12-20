@@ -21,7 +21,7 @@ object WavUtils {
             val outputStream = FileOutputStream(output)
             var totalDataLen: Long = 0
 
-            // 1. Ã‰crire un header vide (placeholder)
+            // 1. écrire un header vide (placeholder)
             writeWavHeader(outputStream, 0, 0, RECORDER_SAMPLE_RATE, RECORDER_CHANNELS)
 
             // 2. Concaténer les données brutes
@@ -31,7 +31,7 @@ object WavUtils {
 
                 val fis = FileInputStream(file)
                 // On saute les 44 octets du header du fichier source
-                // (Note: Pour Ãªtre robuste, il faudrait lire le header pour savoir sa taille réelle,
+                // (Note: Pour être robuste, il faudrait lire le header pour savoir sa taille réelle,
                 // mais pour nos enregistrements internes, c'est toujours 44).
                 fis.skip(HEADER_SIZE.toLong())
                 
@@ -45,7 +45,7 @@ object WavUtils {
 
             outputStream.close()
 
-            // 3. Mettre Ã  jour le header avec la taille finale
+            // 3. Mettre à  jour le header avec la taille finale
             updateHeader(output, totalDataLen, RECORDER_SAMPLE_RATE, RECORDER_CHANNELS)
             return true
         } catch (e: Exception) {
@@ -56,7 +56,7 @@ object WavUtils {
 
     /**
      * Sauvegarde un tableau de Short (PCM) en fichier WAV.
-     * Utile aprÃ¨s l'édition.
+     * Utile après l'édition.
      */
     fun savePcmToWav(pcmData: ShortArray, output: File) {
         try {
@@ -79,7 +79,7 @@ object WavUtils {
     }
 
     /**
-     * Met Ã  jour la taille dans le header d'un fichier WAV existant.
+     * Met à  jour la taille dans le header d'un fichier WAV existant.
      */
     fun updateHeader(file: File, audioLen: Long, sampleRate: Int, channels: Int) {
         try {
@@ -88,7 +88,7 @@ object WavUtils {
             val totalDataLen = audioLen + 36
             val byteRate = sampleRate * 16 * channels / 8
 
-            // On réécrit tout le header pour Ãªtre sÃ»r
+            // On réécrit tout le header pour être sûr
             val header = ByteArray(44)
             header[0] = 'R'.code.toByte(); header[1] = 'I'.code.toByte(); header[2] = 'F'.code.toByte(); header[3] = 'F'.code.toByte()
             header[4] = (totalDataLen and 0xff).toByte()
@@ -127,7 +127,7 @@ object WavUtils {
         val header = ByteArray(44)
         val byteRate = sampleRate * 16 * channels / 8
         
-        // ... (MÃªme logique d'écriture que ci-dessus, factorisée) ...
+        // ... (Même logique d'écriture que ci-dessus, factorisée) ...
         // Pour raccourcir le code ici, assumez que c'est la copie du bloc ci-dessus
         // mais écrivant dans 'out' au lieu de 'raf'.
         

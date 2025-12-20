@@ -22,7 +22,7 @@ class ScriptEditorActivity : AppCompatActivity() {
                 contentResolver.openInputStream(uri)?.use { inputStream ->
                     // Lire le contenu (en UTF-8 par défaut)
                     val text = inputStream.readBytes().toString(Charset.defaultCharset())
-                    // On remplace le texte existant (ou inputScript.append(text) si tu préfÃ¨res)
+                    // On remplace le texte existant (ou inputScript.append(text) si tu préféres)
                     inputScript.setText(text)
                     Toast.makeText(this, "Texte importé", Toast.LENGTH_SHORT).show()
                 }

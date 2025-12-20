@@ -72,7 +72,7 @@ class ProjectActivity : AppCompatActivity() {
     
     override fun onPause() {
         super.onPause()
-        stopPreview() // ArrÃªter la lecture si on quitte l'écran
+        stopPreview() // Arrêter la lecture si on quitte l'écran
     }
 
     private fun setupRecycler() {
@@ -158,7 +158,7 @@ class ProjectActivity : AppCompatActivity() {
             val safeName = rawName.replace(Regex("[^\\p{L}0-9 _-]"), "")
             
             if (chronicleList.any { it.name.equals(safeName, ignoreCase = true) }) {
-                Toast.makeText(this, "Une chronique porte déjÃ  ce nom", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, "Une chronique porte déjà  ce nom", Toast.LENGTH_SHORT).show()
             } else {
                 val prefix = String.format("%03d_", chronicleList.size)
                 val txtFile = File(projectDir, "$prefix$safeName.txt")
@@ -225,7 +225,7 @@ class ProjectActivity : AppCompatActivity() {
     }
 
     private fun playPreview(file: File) {
-        stopPreview() // ArrÃªter l'ancien
+        stopPreview() // Arrêter l'ancien
         try {
             mediaPlayer = MediaPlayer().apply {
                 setDataSource(file.absolutePath)
@@ -234,7 +234,7 @@ class ProjectActivity : AppCompatActivity() {
                 setOnCompletionListener { stopPreview() }
             }
             currentPlayingFile = file
-            adapter.notifyDataSetChanged() // Met Ã  jour les icÃ´nes
+            adapter.notifyDataSetChanged() // Met à  jour les icônes
         } catch (e: Exception) {
             Toast.makeText(this, "Erreur lecture", Toast.LENGTH_SHORT).show()
         }
@@ -244,7 +244,7 @@ class ProjectActivity : AppCompatActivity() {
         mediaPlayer?.release()
         mediaPlayer = null
         currentPlayingFile = null
-        adapter.notifyDataSetChanged() // Remet les icÃ´nes Play
+        adapter.notifyDataSetChanged() // Remet les icônes Play
     }
     
     // Helper pour l'adapter
@@ -257,7 +257,7 @@ class ProjectActivity : AppCompatActivity() {
        private fun performMerge() {
          val filesToMerge = chronicleList.mapNotNull { it.audioFile }
          if (filesToMerge.isEmpty()) {
-             Toast.makeText(this, "Aucun audio Ã  exporter", Toast.LENGTH_SHORT).show()
+             Toast.makeText(this, "Aucun audio à  exporter", Toast.LENGTH_SHORT).show()
              return
          }
          
@@ -271,7 +271,7 @@ class ProjectActivity : AppCompatActivity() {
          val publicDir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC), "PodcastCreateur")
          if (!publicDir.exists()) publicDir.mkdirs()
          
-         // --- DÃ‰BUT MODIFICATION NOMMAGE ---
+         // --- DEBUT MODIFICATION NOMMAGE ---
          
          val originalName = projectDir.name
          
@@ -281,7 +281,7 @@ class ProjectActivity : AppCompatActivity() {
          // 2. Supprimer les accents (les marques diacritiques) avec une Regex
          val withoutAccents = normalized.replace(Regex("\\p{InCombiningDiacriticalMarks}+"), "")
          
-         // 3. Remplacer les caractÃ¨res non-alphanumériques (espaces, ponctuation) par des underscores
+         // 3. Remplacer les caractères non-alphanumériques (espaces, ponctuation) par des underscores
          // On garde a-z, A-Z, 0-9, . et -
          val safeProjectName = withoutAccents.replace(Regex("[^a-zA-Z0-9.-]"), "_")
          
@@ -329,14 +329,13 @@ class ProjectActivity : AppCompatActivity() {
     }
 
     fun onEditAudio(item: Chronicle) {
-        stopPreview() // ArrÃªter la lecture avant d'ouvrir l'éditeur
+        stopPreview() // Arrêter la lecture avant d'ouvrir l'éditeur
         val intent = Intent(this, EditorActivity::class.java)
         intent.putExtra("FILE_PATH", item.audioFile!!.absolutePath)
         startActivity(intent)
     }
 
     fun onRename(item: Chronicle) {
-        // ... (Code identique Ã  avant)
         val input = EditText(this)
         input.setText(item.name)
         input.selectAll()
@@ -364,7 +363,6 @@ class ProjectActivity : AppCompatActivity() {
     }
     
     fun onDelete(item: Chronicle) {
-        // ... (Code identique Ã  avant)
         AlertDialog.Builder(this).setTitle("Supprimer ?").setMessage(item.name).setPositiveButton("Oui") { _, _ ->
             item.scriptFile.delete()
             item.audioFile?.delete()
@@ -420,12 +418,12 @@ class ChronicleAdapter(
         
         holder.btnMenu.setOnClickListener { 
             val popup = PopupMenu(activity, holder.btnMenu)
-            if (hasAudio) popup.menu.add("Ã‰diter l'audio")
+            if (hasAudio) popup.menu.add("Éditer l'audio")
             popup.menu.add("Renommer")
             popup.menu.add("Supprimer")
             popup.setOnMenuItemClickListener { menuItem ->
                 when(menuItem.title) {
-                    "Ã‰diter l'audio" -> activity.onEditAudio(item)
+                    "Éditer l'audio" -> activity.onEditAudio(item)
                     "Renommer" -> activity.onRename(item)
                     "Supprimer" -> activity.onDelete(item)
                 }

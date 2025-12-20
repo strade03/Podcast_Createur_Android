@@ -130,7 +130,7 @@ class HomeActivity : AppCompatActivity() {
             .setPositiveButton("Supprimer") { _, _ ->
                 dir.deleteRecursively()
                 refreshList()
-                Toast.makeText(this, "Ã‰mission supprimée", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, "Émission supprimée", Toast.LENGTH_SHORT).show()
             }
             .setNegativeButton("Annuler", null)
             .show()
