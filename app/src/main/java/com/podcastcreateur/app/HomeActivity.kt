@@ -121,27 +121,7 @@ class HomeActivity : AppCompatActivity() {
         }
     }
 
-        dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
-            val name = input.text.toString().trim()
-            if (name.isNotEmpty()) {
-                // Regex autorisant les accents
-                val safeName = name.replace(Regex("[^\\p{L}0-9 _-]"), "") 
-                val projDir = File(rootDir, safeName)
-                if (projDir.exists()) {
-                    Toast.makeText(this, "Ce nom existe déjÃ ", Toast.LENGTH_SHORT).show()
-                } else {
-                    projDir.mkdirs()
-                    refreshList()
-                    dialog.dismiss() 
-                    val intent = Intent(this, ProjectActivity::class.java)
-                    intent.putExtra("PROJECT_NAME", safeName)
-                    startActivity(intent)
-                }
-            } else {
-                Toast.makeText(this, "Le nom ne peut pas Ãªtre vide", Toast.LENGTH_SHORT).show()
-            }
-        }
-    }
+
 
     private fun showDeleteDialog(dir: File) {
         AlertDialog.Builder(this)
