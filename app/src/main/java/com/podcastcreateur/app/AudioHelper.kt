@@ -19,7 +19,7 @@ data class AudioContent(
 data class AudioMetadata(
     val sampleRate: Int,
     val channelCount: Int,
-    val duration: Long, // en millisecondes
+    val duration: Long,
     val totalSamples: Long
 )
 
@@ -30,13 +30,10 @@ data class AudioMetadata(
 object AudioHelper {
     private const val BIT_RATE = 128000
     private const val CHUNK_SIZE = 8192
-
-    // ============================================
-    // NOUVELLES FONCTIONS OPTIMISÉES
-    // ============================================
+    private const val POINTS_PER_SECOND = 50 // Haute précision
 
     /**
-     * ✅ NOUVELLE : Récupère uniquement les métadonnées (RAPIDE)
+     * ✅ Récupère uniquement les métadonnées (RAPIDE)
      */
     fun getAudioMetadata(input: File): AudioMetadata? {
         if (!input.exists()) return null
@@ -69,7 +66,7 @@ object AudioHelper {
             } catch (e: Exception) { 1 }
             
             val duration = try {
-                format.getLong(MediaFormat.KEY_DURATION) / 1000 // microsecondes -> millisecondes
+                format.getLong(MediaFormat.KEY_DURATION) / 1000
             } catch (e: Exception) { 0L }
             
             val totalSamples = (duration * sampleRate) / 1000
@@ -85,16 +82,21 @@ object AudioHelper {
     }
 
     /**
-     * ✅ NOUVELLE : Génère waveform downsamplée (ne charge PAS tout le fichier)
+     * ✅ NOUVEAU : Génération STREAMING avec PEAKS (comme Audacity)
+     * Callback appelé pendant le traitement pour affichage progressif
      */
-    fun generateWaveformData(
+    fun generateWaveformDataStreaming(
         input: File,
-        targetWidth: Int,
-        onProgress: (Float) -> Unit = {}
-    ): FloatArray {
-        if (!input.exists()) return FloatArray(0)
+        onChunk: (chunk: FloatArray, totalProcessed: Int, isComplete: Boolean) -> Unit
+    ) {
+        if (!input.exists()) {
+            onChunk(FloatArray(0), 0, true)
+            return
+        }
         
         val extractor = MediaExtractor()
+        var decoder: MediaCodec? = null
+        
         try {
             extractor.setDataSource(input.absolutePath)
             
@@ -111,32 +113,34 @@ object AudioHelper {
                 }
             }
             
-            if (trackIndex < 0 || format == null) return FloatArray(0)
+            if (trackIndex < 0 || format == null) {
+                onChunk(FloatArray(0), 0, true)
+                return
+            }
+            
+            val sampleRate = try {
+                format.getInteger(MediaFormat.KEY_SAMPLE_RATE)
+            } catch (e: Exception) { 44100 }
             
             extractor.selectTrack(trackIndex)
-            val mime = format.getString(MediaFormat.KEY_MIME) ?: return FloatArray(0)
+            val mime = format.getString(MediaFormat.KEY_MIME) ?: return
             
-            val decoder = MediaCodec.createDecoderByType(mime)
+            decoder = MediaCodec.createDecoderByType(mime)
             decoder.configure(format, null, null, 0)
             decoder.start()
             
-            val waveform = FloatArray(targetWidth)
             val bufferInfo = MediaCodec.BufferInfo()
+            val samplesPerPoint = sampleRate / POINTS_PER_SECOND
             
-            val duration = try {
-                format.getLong(MediaFormat.KEY_DURATION)
-            } catch (e: Exception) { 1000000L }
+            val chunkSize = POINTS_PER_SECOND * 2 // 2 secondes par chunk
+            val currentChunk = ArrayList<Float>()
             
-            var pixelIndex = 0
-            var sampleSum = 0.0
-            var sampleCount = 0
-            val samplesPerPixel = ((duration / 1000) * 44.1).toInt() / targetWidth
-            
+            var currentPeak = 0f
+            var samplesInPoint = 0
+            var totalPointsProcessed = 0
             var isInputDone = false
-            var processedSamples = 0L
-            val totalApproxSamples = (duration / 1000000.0 * 44100).toLong()
             
-            while (pixelIndex < targetWidth) {
+            while (true) {
                 // Feed input
                 if (!isInputDone) {
                     val inIndex = decoder.dequeueInputBuffer(10000)
@@ -168,24 +172,33 @@ object AudioHelper {
                     if (outBuffer != null && bufferInfo.size > 0) {
                         outBuffer.order(ByteOrder.LITTLE_ENDIAN)
                         
-                        while (outBuffer.hasRemaining() && pixelIndex < targetWidth) {
-                            val sample = outBuffer.short / 32768.0
-                            sampleSum += sample * sample
-                            sampleCount++
-                            processedSamples++
+                        while (outBuffer.hasRemaining()) {
+                            val sample = abs(outBuffer.short / 32768f)
                             
-                            if (sampleCount >= samplesPerPixel) {
-                                waveform[pixelIndex] = sqrt(sampleSum / sampleCount).toFloat()
-                                pixelIndex++
-                                sampleSum = 0.0
-                                sampleCount = 0
+                            // Prendre le PEAK (max absolu) au lieu du RMS
+                            if (sample > currentPeak) {
+                                currentPeak = sample
+                            }
+                            
+                            samplesInPoint++
+                            
+                            if (samplesInPoint >= samplesPerPoint) {
+                                currentChunk.add(currentPeak)
+                                totalPointsProcessed++
                                 
-                                if (totalApproxSamples > 0) {
-                                    onProgress(processedSamples.toFloat() / totalApproxSamples)
+                                currentPeak = 0f
+                                samplesInPoint = 0
+                                
+                                // Envoyer un chunk toutes les 2 secondes
+                                if (currentChunk.size >= chunkSize) {
+                                    val chunkArray = currentChunk.toFloatArray()
+                                    onChunk(chunkArray, totalPointsProcessed, false)
+                                    currentChunk.clear()
                                 }
                             }
                         }
                     }
+                    
                     decoder.releaseOutputBuffer(outIndex, false)
                     
                     if (bufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) {
@@ -196,26 +209,30 @@ object AudioHelper {
                 }
             }
             
-            if (sampleCount > 0 && pixelIndex < targetWidth) {
-                waveform[pixelIndex] = sqrt(sampleSum / sampleCount).toFloat()
+            // Envoyer le dernier chunk
+            if (samplesInPoint > 0) {
+                currentChunk.add(currentPeak)
+                totalPointsProcessed++
             }
             
-            decoder.stop()
-            decoder.release()
-            extractor.release()
-            
-            onProgress(1.0f)
-            return waveform
+            if (currentChunk.isNotEmpty()) {
+                onChunk(currentChunk.toFloatArray(), totalPointsProcessed, true)
+            } else {
+                onChunk(FloatArray(0), totalPointsProcessed, true)
+            }
             
         } catch (e: Exception) {
             e.printStackTrace()
+            onChunk(FloatArray(0), 0, true)
+        } finally {
+            decoder?.stop()
+            decoder?.release()
             extractor.release()
-            return FloatArray(0)
         }
     }
 
     /**
-     * ✅ NOUVELLE : Coupe audio SANS charger tout en mémoire
+     * ✅ Coupe audio SANS charger tout en mémoire
      */
     fun trimAudio(
         inputFile: File,
@@ -258,7 +275,7 @@ object AudioHelper {
             val bufferInfo = MediaCodec.BufferInfo()
             
             while (true) {
-                val sampleTime = extractor.sampleTime / 1000 // µs -> ms
+                val sampleTime = extractor.sampleTime / 1000
                 if (sampleTime > endMs || sampleTime < 0) break
                 
                 bufferInfo.size = extractor.readSampleData(buffer, 0)
@@ -284,7 +301,7 @@ object AudioHelper {
     }
 
     /**
-     * ✅ NOUVELLE : Normalisation en 2 passes PAR CHUNKS
+     * ✅ Normalisation en 2 passes PAR CHUNKS
      */
     fun normalizeAudio(
         inputFile: File,
@@ -295,7 +312,6 @@ object AudioHelper {
         targetPeak: Float = 0.95f,
         onProgress: (Float) -> Unit = {}
     ): Boolean {
-        // PASSE 1 : Trouver le peak max
         onProgress(0f)
         val maxPeak = findMaxPeakInRange(inputFile, startMs, endMs) { progress ->
             onProgress(progress * 0.5f)
@@ -305,7 +321,6 @@ object AudioHelper {
         
         val gain = targetPeak / maxPeak
         
-        // PASSE 2 : Appliquer le gain
         return applyGainToFile(inputFile, outputFile, gain, startMs, endMs, sampleRate) { progress ->
             onProgress(0.5f + progress * 0.5f)
         }
@@ -425,14 +440,11 @@ object AudioHelper {
         sampleRate: Int,
         onProgress: (Float) -> Unit
     ): Boolean {
-        // Pour simplifier, on utilise decodeToPCM + modifications
-        // Version complète avec pipeline streaming serait plus complexe
         try {
             val content = decodeToPCM(inputFile)
             val startSample = ((startMs * sampleRate) / 1000).toInt()
             val endSample = ((endMs * sampleRate) / 1000).toInt().coerceAtMost(content.data.size)
             
-            // Applique le gain
             for (i in startSample until endSample) {
                 if (i < content.data.size) {
                     val amplified = (content.data[i] * gain).toInt()
@@ -453,13 +465,8 @@ object AudioHelper {
         }
     }
 
-    // ============================================
-    // ANCIENNES FONCTIONS (GARDÉES POUR COMPATIBILITÉ)
-    // ============================================
-
     /**
-     * Décode le fichier et renvoie les données MONO avec leur fréquence d'origine.
-     * ⚠️ GARDE pour compatibilité (lecture audio, merge)
+     * Décode le fichier et renvoie les données MONO
      */
     fun decodeToPCM(input: File): AudioContent {
         if (!input.exists()) return AudioContent(ShortArray(0), 44100)
@@ -592,28 +599,6 @@ object AudioHelper {
         return mono
     }
 
-    private fun resample(input: ShortArray, currentRate: Int, targetRate: Int): ShortArray {
-        if (currentRate == targetRate) return input
-        
-        val ratio = currentRate.toDouble() / targetRate.toDouble()
-        val outputSize = (input.size / ratio).toInt()
-        val output = ShortArray(outputSize)
-
-        for (i in 0 until outputSize) {
-            val position = i * ratio
-            val index = position.toInt()
-            if (index >= input.size - 1) {
-                output[i] = input[input.size - 1]
-            } else {
-                val fraction = position - index
-                val val1 = input[index]
-                val val2 = input[index + 1]
-                output[i] = (val1 + fraction * (val2 - val1)).toInt().toShort()
-            }
-        }
-        return output
-    }
-
     fun savePCMToAAC(pcmData: ShortArray, outputFile: File, sampleRate: Int): Boolean {
         var encoder: MediaCodec? = null
         var muxer: MediaMuxer? = null
@@ -726,123 +711,25 @@ object AudioHelper {
         }
     }
     
-    /**
-    * Génère la waveform downsamplée uniquement pour les premiers maxSamples à afficher.
-    * Cela limite la lecture/décodage au début du fichier pour accélérer l'affichage initial.
-    */
-    fun generateWaveformDataPartial(
-        input: File,
-        targetWidth: Int,
-        maxSamples: Int
-    ): FloatArray {
-        if (!input.exists()) return FloatArray(0)
+    private fun resample(input: ShortArray, currentRate: Int, targetRate: Int): ShortArray {
+        if (currentRate == targetRate) return input
+        
+        val ratio = currentRate.toDouble() / targetRate.toDouble()
+        val outputSize = (input.size / ratio).toInt()
+        val output = ShortArray(outputSize)
 
-        val extractor = MediaExtractor()
-        try {
-            extractor.setDataSource(input.absolutePath)
-
-            var trackIndex = -1
-            var format: MediaFormat? = null
-
-            for (i in 0 until extractor.trackCount) {
-                val f = extractor.getTrackFormat(i)
-                val mime = f.getString(MediaFormat.KEY_MIME)
-                if (mime?.startsWith("audio/") == true) {
-                    trackIndex = i
-                    format = f
-                    break
-                }
+        for (i in 0 until outputSize) {
+            val position = i * ratio
+            val index = position.toInt()
+            if (index >= input.size - 1) {
+                output[i] = input[input.size - 1]
+            } else {
+                val fraction = position - index
+                val val1 = input[index]
+                val val2 = input[index + 1]
+                output[i] = (val1 + fraction * (val2 - val1)).toInt().toShort()
             }
-
-            if (trackIndex < 0 || format == null) return FloatArray(0)
-            
-            extractor.selectTrack(trackIndex)
-            val mime = format.getString(MediaFormat.KEY_MIME) ?: return FloatArray(0)
-
-            val decoder = MediaCodec.createDecoderByType(mime)
-            decoder.configure(format, null, null, 0)
-            decoder.start()
-
-            val waveform = FloatArray(targetWidth)
-            val bufferInfo = MediaCodec.BufferInfo()
-
-            val sampleRate = try {
-                format.getInteger(MediaFormat.KEY_SAMPLE_RATE)
-            } catch (e: Exception) {
-                44100
-            }
-
-            val samplesPerPixel = maxSamples / targetWidth
-            if (samplesPerPixel == 0) return FloatArray(0)
-
-            var pixelIndex = 0
-            var sampleSum = 0.0
-            var sampleCount = 0
-
-            var isInputDone = false
-            var samplesProcessed = 0
-
-            while (pixelIndex < targetWidth && samplesProcessed < maxSamples) {
-                if (!isInputDone) {
-                    val inIndex = decoder.dequeueInputBuffer(10000)
-                    if (inIndex >= 0) {
-                        val inBuffer = decoder.getInputBuffer(inIndex)
-                        if (inBuffer != null) {
-                            val sampleSize = extractor.readSampleData(inBuffer, 0)
-                            if (sampleSize < 0) {
-                                decoder.queueInputBuffer(inIndex, 0, 0, 0, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
-                                isInputDone = true
-                            } else {
-                                decoder.queueInputBuffer(inIndex, 0, sampleSize, extractor.sampleTime, 0)
-                                extractor.advance()
-                            }
-                        }
-                    }
-                }
-
-                val outIndex = decoder.dequeueOutputBuffer(bufferInfo, 10000)
-                if (outIndex >= 0) {
-                    val outBuffer = decoder.getOutputBuffer(outIndex)
-                    if (outBuffer != null && bufferInfo.size > 0) {
-                        outBuffer.order(ByteOrder.LITTLE_ENDIAN)
-
-                        while (outBuffer.hasRemaining() && pixelIndex < targetWidth && samplesProcessed < maxSamples) {
-                            val sample = outBuffer.short / 32768.0
-                            sampleSum += sample * sample
-                            sampleCount++
-                            samplesProcessed++
-
-                            if (sampleCount >= samplesPerPixel) {
-                                waveform[pixelIndex] = kotlin.math.sqrt(sampleSum / sampleCount).toFloat()
-                                pixelIndex++
-                                sampleSum = 0.0
-                                sampleCount = 0
-                            }
-                        }
-                    }
-                    decoder.releaseOutputBuffer(outIndex, false)
-                    if (bufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) break
-                } else if (outIndex == MediaCodec.INFO_TRY_AGAIN_LATER) {
-                    if (isInputDone) break
-                }
-            }
-
-            // Final pixel if needed
-            if (sampleCount > 0 && pixelIndex < targetWidth) {
-                waveform[pixelIndex] = kotlin.math.sqrt(sampleSum / sampleCount).toFloat()
-            }
-
-            decoder.stop()
-            decoder.release()
-            extractor.release()
-
-            return waveform
-
-        } catch (e: Exception) {
-            e.printStackTrace()
-            extractor.release()
-            return FloatArray(0)
         }
+        return output
     }
-    
 }

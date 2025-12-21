@@ -19,20 +19,23 @@ import kotlinx.coroutines.*
 import java.io.File
 
 /**
- * ÉDITEUR OPTIMISÉ - VERSION CORRIGÉE
+ * ÉDITEUR OPTIMISÉ - VERSION STREAMING PROGRESSIF
+ * Affiche les premières secondes immédiatement
+ * Charge le reste en arrière-plan
  */
 class EditorActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityEditorBinding
     private lateinit var currentFile: File
     
-    private var waveformData: FloatArray = FloatArray(0)
     private var metadata: AudioMetadata? = null
     
     private var audioTrack: AudioTrack? = null
     private var isPlaying = false
     private var currentZoom = 1.0f
     private var playbackJob: Job? = null
+    
+    private var waveformLoadJob: Job? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -89,11 +92,15 @@ class EditorActivity : AppCompatActivity() {
         }
     }
 
+    /**
+     * ✅ CHARGEMENT OPTIMISÉ - STREAMING PROGRESSIF
+     */
     private fun loadWaveformOptimized() {
         binding.progressBar.visibility = View.VISIBLE
 
-        lifecycleScope.launch(Dispatchers.IO) {
+        waveformLoadJob = lifecycleScope.launch(Dispatchers.IO) {
             try {
+                // 1. Charger les métadonnées (RAPIDE)
                 metadata = AudioHelper.getAudioMetadata(currentFile)
                 
                 if (metadata == null) {
@@ -104,34 +111,31 @@ class EditorActivity : AppCompatActivity() {
                     return@launch
                 }
 
-                val sampleRate = metadata!!.sampleRate
-                val maxSamplesToShow = sampleRate * 60  // 1 minute max
-                val totalSamples = metadata!!.totalSamples.toInt()
-                val limitSamples = totalSamples.coerceAtMost(maxSamplesToShow)
-
-                val screenWidth = resources.displayMetrics.widthPixels
-                val targetWidth = screenWidth * 2
-
-                // Générer une waveform downsamplée correspondant aux premiers 1 min seulement
-                val partialWaveform = AudioHelper.generateWaveformDataPartial(currentFile, targetWidth, limitSamples)
+                val meta = metadata!!
                 
                 withContext(Dispatchers.Main) {
-                    binding.waveformView.setWaveformData(partialWaveform, limitSamples)
+                    // 2. Initialiser la vue avec les métadonnées
+                    binding.waveformView.setMetadata(
+                        meta.totalSamples.toInt(),
+                        meta.duration,
+                        meta.sampleRate
+                    )
+                    binding.txtDuration.text = formatTime(meta.duration)
                     binding.progressBar.visibility = View.GONE
-                    binding.txtDuration.text = formatTime(metadata!!.duration.coerceAtMost(60000)) // max 1 min shown
                 }
                 
-                // En arrière-plan, charger toute la waveform sans limite, puis rafraîchir UI si ok
-                if (limitSamples < totalSamples) {
-                    val fullWaveform = AudioHelper.generateWaveformData(currentFile, targetWidth)
-                    withContext(Dispatchers.Main) {
-                        waveformData = fullWaveform
-                        binding.waveformView.setWaveformData(fullWaveform, totalSamples)
-                        binding.txtDuration.text = formatTime(metadata!!.duration)
-                        binding.waveformView.invalidate()
+                // 3. Générer la waveform en streaming (PROGRESSIF)
+                AudioHelper.generateWaveformDataStreaming(currentFile) { chunk, totalProcessed, isComplete ->
+                    lifecycleScope.launch(Dispatchers.Main) {
+                        // Ajouter le chunk à la vue
+                        binding.waveformView.appendWaveformChunk(chunk)
+                        
+                        if (isComplete) {
+                            binding.waveformView.setComplete()
+                        }
                     }
                 }
-
+                
             } catch (e: Exception) {
                 e.printStackTrace()
                 withContext(Dispatchers.Main) {
@@ -150,7 +154,7 @@ class EditorActivity : AppCompatActivity() {
     }
 
     private fun applyZoom(newZoom: Float) {
-        val clampedZoom = newZoom.coerceIn(1.0f, 20.0f)
+        val clampedZoom = newZoom.coerceIn(0.5f, 20.0f)
         
         val oldWidth = binding.waveformView.width
         val playheadRelativePos = if (oldWidth > 0 && metadata != null) {
@@ -172,7 +176,7 @@ class EditorActivity : AppCompatActivity() {
     }
 
     /**
-     * LECTURE CORRIGÉE - Mise à jour du pointeur et bouton
+     * LECTURE AUDIO
      */
     private fun playAudio() {
         val meta = metadata ?: return
@@ -209,7 +213,6 @@ class EditorActivity : AppCompatActivity() {
                     return@launch
                 }
                 
-                // Positionnement au début de la sélection si applicable
                 var startSample = if (binding.waveformView.selectionStart >= 0) {
                     binding.waveformView.selectionStart
                 } else {
@@ -222,18 +225,15 @@ class EditorActivity : AppCompatActivity() {
                     meta.totalSamples.toInt()
                 }
                 
-                // Convertir en temps
                 val startMs = (startSample * 1000L) / meta.sampleRate
                 extractor.selectTrack(trackIndex)
                 extractor.seekTo(startMs * 1000, MediaExtractor.SEEK_TO_CLOSEST_SYNC)
                 
-                // Créer le décodeur
                 val mime = format.getString(MediaFormat.KEY_MIME) ?: return@launch
                 decoder = MediaCodec.createDecoderByType(mime)
                 decoder.configure(format, null, null, 0)
                 decoder.start()
                 
-                // Créer l'AudioTrack
                 val minBuf = AudioTrack.getMinBufferSize(
                     meta.sampleRate,
                     AudioFormat.CHANNEL_OUT_MONO,
@@ -253,24 +253,21 @@ class EditorActivity : AppCompatActivity() {
                 
                 val bufferInfo = MediaCodec.BufferInfo()
                 var currentSample = startSample
-                val updateInterval = meta.sampleRate / 20 // 20 Hz
+                val updateInterval = meta.sampleRate / 20
                 var samplesSinceUpdate = 0
                 var isInputDone = false
                 
-                // Boucle de décodage/lecture streaming
                 while (isPlaying && currentSample < endSample) {
-                    // Feed input
                     if (!isInputDone) {
                         val inIndex = decoder.dequeueInputBuffer(10000)
                         if (inIndex >= 0) {
                             val inBuffer = decoder.getInputBuffer(inIndex)
                             if (inBuffer != null) {
                                 val sampleSize = extractor.readSampleData(inBuffer, 0)
-                                val sampleTime = extractor.sampleTime / 1000 // µs -> ms
-                                val sampleTimeMs = sampleTime
+                                val sampleTime = extractor.sampleTime / 1000
                                 val endMs = (endSample * 1000L) / meta.sampleRate
                                 
-                                if (sampleSize < 0 || sampleTimeMs >= endMs) {
+                                if (sampleSize < 0 || sampleTime >= endMs) {
                                     decoder.queueInputBuffer(
                                         inIndex, 0, 0, 0,
                                         MediaCodec.BUFFER_FLAG_END_OF_STREAM
@@ -287,20 +284,16 @@ class EditorActivity : AppCompatActivity() {
                         }
                     }
                     
-                    // Get output
                     val outIndex = decoder.dequeueOutputBuffer(bufferInfo, 10000)
                     if (outIndex >= 0) {
                         val outBuffer = decoder.getOutputBuffer(outIndex)
                         if (outBuffer != null && bufferInfo.size > 0) {
-                            // Lire les samples
                             val tempArray = ShortArray(bufferInfo.size / 2)
                             outBuffer.order(ByteOrder.LITTLE_ENDIAN)
                             outBuffer.asShortBuffer().get(tempArray)
                             
-                            // Jouer l'audio
                             audioTrack?.write(tempArray, 0, tempArray.size)
                             
-                            // Mettre à jour la position
                             currentSample += tempArray.size
                             samplesSinceUpdate += tempArray.size
                             
@@ -324,7 +317,6 @@ class EditorActivity : AppCompatActivity() {
                     }
                 }
                 
-                // Dernière mise à jour
                 withContext(Dispatchers.Main) {
                     binding.waveformView.playheadPos = currentSample
                     binding.waveformView.invalidate()
@@ -372,13 +364,12 @@ class EditorActivity : AppCompatActivity() {
         audioTrack?.release()
         audioTrack = null
         
-        // CORRECTION: Réinitialiser le bouton immédiatement
         binding.btnPlay.setImageResource(R.drawable.ic_play)
         binding.waveformView.invalidate()
     }
     
     /**
-     * COUPE CORRIGÉE
+     * COUPE
      */
     private fun cutSelection() {
         val meta = metadata ?: return
@@ -405,18 +396,15 @@ class EditorActivity : AppCompatActivity() {
         
         lifecycleScope.launch(Dispatchers.IO) {
             try {
-                // Charger les données complètes (nécessaire pour la coupe)
                 val content = AudioHelper.decodeToPCM(currentFile)
                 val pcmData = content.data
                 
-                // CORRECTION: Créer un nouveau tableau sans la partie sélectionnée
                 val beforeCut = pcmData.sliceArray(0 until startSample)
                 val afterCut = pcmData.sliceArray(endSample until pcmData.size)
                 val resultData = beforeCut + afterCut
                 
                 val tempFile = File(currentFile.parent, "temp_cut_${System.currentTimeMillis()}.m4a")
                 
-                // Sauvegarder le résultat
                 val success = AudioHelper.savePCMToAAC(resultData, tempFile, meta.sampleRate)
                 
                 if (success) {
@@ -518,5 +506,6 @@ class EditorActivity : AppCompatActivity() {
     override fun onStop() {
         super.onStop()
         stopAudio()
+        waveformLoadJob?.cancel()
     }
 }
