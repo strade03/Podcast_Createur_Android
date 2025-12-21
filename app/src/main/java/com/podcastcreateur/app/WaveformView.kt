@@ -15,10 +15,7 @@ class WaveformView @JvmOverloads constructor(
 ) : View(context, attrs) {
 
     private val points = ArrayList<Float>()
-    private var totalSamplesEstimate = 0L
-    
-    // NOUVEAU : Variable modifiable pour s'adapter à la fréquence du fichier
-    private var samplesPerPoint = 882 
+    private var totalPointsEstimate = 0L
     private var zoomFactor = 1.0f 
 
     var selectionStart = -1
@@ -55,7 +52,7 @@ class WaveformView @JvmOverloads constructor(
         }
 
         override fun onSingleTapUp(e: MotionEvent): Boolean {
-            playheadPos = pixelToSample(e.x)
+            playheadPos = pixelToIndex(e.x)
             selectionStart = -1
             selectionEnd = -1
             invalidate()
@@ -64,7 +61,7 @@ class WaveformView @JvmOverloads constructor(
 
         override fun onLongPress(e: MotionEvent) {
             isDraggingSelection = true
-            val s = pixelToSample(e.x)
+            val s = pixelToIndex(e.x)
             selectionStart = s
             selectionEnd = s
             performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
@@ -73,10 +70,8 @@ class WaveformView @JvmOverloads constructor(
         }
     })
 
-    // NOUVELLE SIGNATURE : On reçoit le ratio samplesPerPoint calculé
-    fun initialize(totalSamples: Long, ratioSamplesPerPoint: Int) {
-        this.totalSamplesEstimate = totalSamples
-        this.samplesPerPoint = ratioSamplesPerPoint
+    fun initialize(totalPoints: Long) {
+        this.totalPointsEstimate = totalPoints
         clearData()
     }
     
@@ -108,15 +103,8 @@ class WaveformView @JvmOverloads constructor(
     }
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
-        // Protection division par zéro
-        val spp = if(samplesPerPoint > 0) samplesPerPoint else 882
-        
-        val totalPoints = if (points.size > 0 && points.size * spp > totalSamplesEstimate) {
-            points.size.toLong()
-        } else {
-            totalSamplesEstimate / spp
-        }
-        val contentWidth = (totalPoints * zoomFactor).toInt()
+        val total = if (points.size > totalPointsEstimate) points.size.toLong() else totalPointsEstimate
+        val contentWidth = (total * zoomFactor).toInt()
         val finalWidth = resolveSize(contentWidth, widthMeasureSpec)
         val finalHeight = getDefaultSize(suggestedMinimumHeight, heightMeasureSpec)
         setMeasuredDimension(contentWidth.coerceAtLeast(finalWidth), finalHeight)
@@ -133,10 +121,7 @@ class WaveformView @JvmOverloads constructor(
         for (i in points.indices) {
             val x = i * zoomFactor
             val valPeak = points[i] 
-            
-            // ÉCHELLE REDUITE A 0.65f POUR UN RENDU PLUS FIN
             val barHeight = valPeak * centerY * 0.65f 
-            
             canvas.drawLine(x, centerY - barHeight, x, centerY + barHeight, paint)
         }
 
@@ -150,21 +135,17 @@ class WaveformView @JvmOverloads constructor(
         canvas.drawLine(px, 0f, px, h, playheadPaint)
     }
     
-    fun sampleToPixel(sample: Int): Float {
-        val spp = if(samplesPerPoint > 0) samplesPerPoint else 882
-        val pointIndex = sample / spp
-        return pointIndex * zoomFactor
+    fun sampleToPixel(index: Int): Float {
+        return index * zoomFactor
     }
 
-    fun pixelToSample(x: Float): Int {
-        val spp = if(samplesPerPoint > 0) samplesPerPoint else 882
-        val pointIndex = x / zoomFactor
-        return (pointIndex * spp).toInt()
+    fun pixelToIndex(x: Float): Int {
+        return (x / zoomFactor).toInt()
     }
     
     fun getCenterSample(scrollX: Int, visibleWidth: Int): Int {
         val centerX = scrollX + (visibleWidth / 2)
-        return pixelToSample(centerX.toFloat())
+        return pixelToIndex(centerX.toFloat())
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
@@ -175,7 +156,7 @@ class WaveformView @JvmOverloads constructor(
         when(event.action) {
             MotionEvent.ACTION_MOVE -> {
                 if (isDraggingSelection) {
-                    val s = pixelToSample(event.x)
+                    val s = pixelToIndex(event.x)
                     selectionEnd = s
                     invalidate()
                     return true
@@ -190,18 +171,14 @@ class WaveformView @JvmOverloads constructor(
                     if(selectionStart > selectionEnd) {
                         val t = selectionStart; selectionStart = selectionEnd; selectionEnd = t
                     }
-                    
-                    // --- PLACE LE CURSEUR AU DÉBUT DE LA SÉLECTION ---
                     if (selectionStart >= 0 && selectionStart != selectionEnd) {
                         playheadPos = selectionStart
                     }
-                    
                     invalidate()
                     return true
                 }
             }
         }
-        
         return false
     }
     

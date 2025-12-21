@@ -19,8 +19,6 @@ class EditorActivity : AppCompatActivity() {
     private lateinit var currentFile: File
     
     private var metadata: AudioMetadata? = null
-    
-    // NOUVEAU : MediaPlayer au lieu de AudioTrack/MediaCodec pour la lecture
     private var mediaPlayer: MediaPlayer? = null
     private var playbackJob: Job? = null
     
@@ -84,18 +82,14 @@ class EditorActivity : AppCompatActivity() {
                 return@launch
             }
 
-            // Calcul du ratio pour l'interface graphique
-            // On veut toujours 50 points par seconde pour que l'affichage soit constant
-            val samplesPerPoint = meta.sampleRate / 50
-
             withContext(Dispatchers.Main) {
                 binding.txtDuration.text = formatTime(meta.duration)
-                // On configure la vue avec le ratio précis
-                binding.waveformView.initialize(meta.totalSamples, samplesPerPoint)
+                // On estime le nombre de points : Durée (sec) * 50
+                val estimatedPoints = (meta.duration / 1000) * AudioHelper.POINTS_PER_SECOND
+                binding.waveformView.initialize(estimatedPoints)
             }
 
-            // On passe le sampleRate pour le calcul dynamique des points
-            AudioHelper.loadWaveformStream(currentFile, meta.sampleRate) { newChunk ->
+            AudioHelper.loadWaveformStream(currentFile) { newChunk ->
                 runOnUiThread {
                     binding.waveformView.appendData(newChunk)
                     if (binding.progressBar.visibility == View.VISIBLE) {
@@ -133,14 +127,15 @@ class EditorActivity : AppCompatActivity() {
                 setDataSource(currentFile.absolutePath)
                 prepare()
                 
-                val startSample = if(binding.waveformView.selectionStart >= 0) 
+                // Conversion Index Point -> MS (1 point = 20ms)
+                val startIndex = if(binding.waveformView.selectionStart >= 0) 
                                     binding.waveformView.selectionStart 
                                   else 
                                     binding.waveformView.playheadPos
                 
-                val startMs = (startSample * 1000L) / meta.sampleRate
+                val startMs = startIndex * (1000 / AudioHelper.POINTS_PER_SECOND)
                 
-                seekTo(startMs.toInt())
+                seekTo(startMs)
                 start()
                 
                 setOnCompletionListener { stopAudio() }
@@ -149,20 +144,22 @@ class EditorActivity : AppCompatActivity() {
             binding.btnPlay.setImageResource(R.drawable.ic_stop_read)
             
             playbackJob = lifecycleScope.launch {
-                val endSample = if(binding.waveformView.selectionEnd > binding.waveformView.selectionStart && binding.waveformView.selectionStart >= 0) 
+                val endIndex = if(binding.waveformView.selectionEnd > binding.waveformView.selectionStart && binding.waveformView.selectionStart >= 0) 
                                     binding.waveformView.selectionEnd 
                                 else 
-                                    meta.totalSamples.toInt()
+                                    Int.MAX_VALUE
                                     
                 while (mediaPlayer?.isPlaying == true) {
                     val currentMs = mediaPlayer?.currentPosition ?: 0
-                    val currentSample = ((currentMs.toLong() * meta.sampleRate) / 1000).toInt()
                     
-                    binding.waveformView.playheadPos = currentSample
+                    // Conversion MS -> Index Point
+                    val currentIndex = currentMs / (1000 / AudioHelper.POINTS_PER_SECOND)
+                    
+                    binding.waveformView.playheadPos = currentIndex
                     binding.waveformView.invalidate()
-                    autoScroll(currentSample)
+                    autoScroll(currentIndex)
                     
-                    if (binding.waveformView.selectionStart >= 0 && currentSample >= endSample) {
+                    if (binding.waveformView.selectionStart >= 0 && currentIndex >= endIndex) {
                         mediaPlayer?.pause()
                         break
                     }
@@ -198,15 +195,21 @@ class EditorActivity : AppCompatActivity() {
 
     private fun cutSelection() {
         val meta = metadata ?: return
-        val start = binding.waveformView.selectionStart
-        val end = binding.waveformView.selectionEnd
-        if (start < 0 || end <= start) return
+        val startIdx = binding.waveformView.selectionStart
+        val endIdx = binding.waveformView.selectionEnd
+        if (startIdx < 0 || endIdx <= startIdx) return
         
         stopAudio() 
         binding.progressBar.visibility = View.VISIBLE
         lifecycleScope.launch(Dispatchers.IO) {
+            // Conversion Index Point -> Samples pour la coupe physique
+            // (Index * SampleRate / 50)
+            val samplesPerPoint = meta.sampleRate / AudioHelper.POINTS_PER_SECOND
+            val startSample = startIdx * samplesPerPoint
+            val endSample = endIdx * samplesPerPoint
+            
             val tmp = File(currentFile.parent, "tmp_cut.m4a")
-            val success = AudioHelper.deleteRegionStreaming(currentFile, tmp, start, end)
+            val success = AudioHelper.deleteRegionStreaming(currentFile, tmp, startSample, endSample)
             
             if(success) {
                 currentFile.delete()
@@ -227,15 +230,20 @@ class EditorActivity : AppCompatActivity() {
 
     private fun normalizeSelection() {
         val meta = metadata ?: return
-        val start = if(binding.waveformView.selectionStart >= 0) binding.waveformView.selectionStart else 0
-        val end = if(binding.waveformView.selectionEnd > start) binding.waveformView.selectionEnd else meta.totalSamples.toInt()
         stopAudio()
         binding.progressBar.visibility = View.VISIBLE
         lifecycleScope.launch(Dispatchers.IO) {
+            
+            val startIdx = if(binding.waveformView.selectionStart >= 0) binding.waveformView.selectionStart else 0
+            val endIdx = if(binding.waveformView.selectionEnd > startIdx) binding.waveformView.selectionEnd else Int.MAX_VALUE
+            
+            val startMs = (startIdx * 1000L) / AudioHelper.POINTS_PER_SECOND
+            // Si fin, on prend une grande valeur
+            val endMs = if(endIdx == Int.MAX_VALUE) meta.duration else (endIdx * 1000L) / AudioHelper.POINTS_PER_SECOND
+            
             val tmp = File(currentFile.parent, "tmp_norm.m4a")
-            val sMs = (start * 1000L)/meta.sampleRate
-            val eMs = (end * 1000L)/meta.sampleRate
-            if(AudioHelper.normalizeAudio(currentFile, tmp, sMs, eMs, meta.sampleRate, 0.95f) {}) {
+            
+            if(AudioHelper.normalizeAudio(currentFile, tmp, startMs, endMs, meta.sampleRate, 0.95f) {}) {
                 currentFile.delete(); tmp.renameTo(currentFile)
                 withContext(Dispatchers.Main) {
                     binding.waveformView.clearData()

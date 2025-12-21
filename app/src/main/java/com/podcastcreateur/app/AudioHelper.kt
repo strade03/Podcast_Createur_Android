@@ -20,8 +20,10 @@ data class AudioContent(
 
 object AudioHelper {
     private const val BIT_RATE = 128000
-    // On vise 50 points par seconde pour l'affichage (fluide et précis)
-    private const val POINTS_PER_SECOND = 50 
+    
+    // CIBLE : 50 points par seconde (1 point = 20ms)
+    // C'est notre constante de temps universelle pour la synchro
+    const val POINTS_PER_SECOND = 50 
 
     fun getAudioMetadata(input: File): AudioMetadata? {
         if (!input.exists()) return null
@@ -55,14 +57,12 @@ object AudioHelper {
         }
     }
 
-    // --- STREAMING WAVEFORM SYNCHRONISÉ ---
-    fun loadWaveformStream(input: File, sampleRate: Int, onUpdate: (FloatArray) -> Unit) {
+    /**
+     * Génère l'onde en s'adaptant à la fréquence réelle du fichier (44.1k, 48k, etc.)
+     * pour garantir que 50 points = 1 seconde.
+     */
+    fun loadWaveformStream(input: File, onUpdate: (FloatArray) -> Unit) {
         if (!input.exists()) { onUpdate(FloatArray(0)); return }
-        
-        // Calcul dynamique : Combien de samples pour faire 1 point ?
-        // Ex: 44100 / 50 = 882 samples/point
-        // Ex: 48000 / 50 = 960 samples/point
-        val samplesPerPoint = sampleRate / POINTS_PER_SECOND
         
         val extractor = MediaExtractor()
         try {
@@ -87,6 +87,10 @@ object AudioHelper {
             var count = 0
             var isEOS = false
             
+            // Valeur par défaut (sera mise à jour par le décodeur)
+            var currentSampleRate = 44100
+            var samplesPerPoint = currentSampleRate / POINTS_PER_SECOND
+            
             while (true) {
                 if (!isEOS) {
                     val inIdx = decoder.dequeueInputBuffer(5000)
@@ -104,6 +108,17 @@ object AudioHelper {
                 }
                 
                 val outIdx = decoder.dequeueOutputBuffer(info, 5000)
+                
+                // --- DETECTION CHANGEMENT FREQUENCE (Vital pour MP3 48kHz) ---
+                if (outIdx == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
+                    val newFormat = decoder.outputFormat
+                    if (newFormat.containsKey(MediaFormat.KEY_SAMPLE_RATE)) {
+                        currentSampleRate = newFormat.getInteger(MediaFormat.KEY_SAMPLE_RATE)
+                        // Recalcul du ratio pour maintenir la synchro temporelle
+                        samplesPerPoint = currentSampleRate / POINTS_PER_SECOND
+                    }
+                }
+                
                 if (outIdx >= 0) {
                     val outBuf = decoder.getOutputBuffer(outIdx)
                     if (outBuf != null && info.size > 0) {
@@ -114,7 +129,7 @@ object AudioHelper {
                             if (sample > maxPeak) maxPeak = sample
                             count++
                             
-                            // Utilisation du seuil calculé dynamiquement
+                            // On coupe tous les X samples (X dépend de la fréquence réelle)
                             if (count >= samplesPerPoint) {
                                 tempBuf.add(maxPeak.coerceAtMost(1.0f))
                                 maxPeak = 0f
@@ -276,7 +291,6 @@ object AudioHelper {
         }
     }
 
-    // --- UTILS ---
     fun decodeToPCM(input: File): AudioContent {
         if (!input.exists()) return AudioContent(ShortArray(0), 44100)
         val ex = MediaExtractor(); try{ex.setDataSource(input.absolutePath)}catch(e:Exception){return AudioContent(ShortArray(0),44100)}
