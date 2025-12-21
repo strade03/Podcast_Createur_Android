@@ -150,10 +150,10 @@ class EditorActivity : AppCompatActivity() {
                                     Int.MAX_VALUE
                                     
                 while (mediaPlayer?.isPlaying == true) {
-                    val currentMs = mediaPlayer?.currentPosition ?: 0
+                    val currentMs = mediaPlayer?.currentPosition?.toLong() ?: 0L
                     
                     // Conversion MS -> Index Point
-                    val currentIndex = currentMs / (1000 / AudioHelper.POINTS_PER_SECOND)
+                    val currentIndex = ((currentMs * AudioHelper.POINTS_PER_SECOND) / 1000).toInt()
                     
                     binding.waveformView.playheadPos = currentIndex
                     binding.waveformView.invalidate()

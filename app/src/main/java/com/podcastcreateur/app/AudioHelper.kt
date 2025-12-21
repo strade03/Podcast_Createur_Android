@@ -5,6 +5,7 @@ import java.io.File
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import kotlin.math.abs
+import android.media.MediaMetadataRetriever
 
 data class AudioMetadata(
     val sampleRate: Int,
@@ -24,9 +25,23 @@ object AudioHelper {
     // CIBLE : 50 points par seconde (1 point = 20ms)
     // C'est notre constante de temps universelle pour la synchro
     const val POINTS_PER_SECOND = 50 
+    
+    private fun getDurationAccurate(file: File): Long {
+            val retriever = MediaMetadataRetriever()
+            return try {
+                retriever.setDataSource(file.absolutePath)
+                val time = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
+                time?.toLong() ?: 0L // Retourne les MS
+            } catch (e: Exception) { 0L } 
+            finally { retriever.release() }
+    }
 
     fun getAudioMetadata(input: File): AudioMetadata? {
         if (!input.exists()) return null
+        
+        // 1. On récupère la durée ULTRA PRÉCISE via Retriever
+        val accurateDuration = getDurationAccurate(input)
+        
         val extractor = MediaExtractor()
         try {
             extractor.setDataSource(input.absolutePath)
@@ -45,10 +60,11 @@ object AudioHelper {
             
             val sampleRate = try { format.getInteger(MediaFormat.KEY_SAMPLE_RATE) } catch (e: Exception) { 44100 }
             val channelCount = try { format.getInteger(MediaFormat.KEY_CHANNEL_COUNT) } catch (e: Exception) { 1 }
-            val duration = try { format.getLong(MediaFormat.KEY_DURATION) / 1000 } catch (e: Exception) { 0L }
-            val totalSamples = (duration * sampleRate) / 1000
             
-            return AudioMetadata(sampleRate, channelCount, duration, totalSamples)
+            // 2. On utilise la durée précise ici au lieu de celle de l'extractor
+            val totalSamples = (accurateDuration * sampleRate) / 1000
+            
+            return AudioMetadata(sampleRate, channelCount, accurateDuration, totalSamples)
         } catch (e: Exception) {
             e.printStackTrace()
             return null
@@ -87,8 +103,8 @@ object AudioHelper {
             var count = 0
             var isEOS = false
             
-            // Valeur par défaut (sera mise à jour par le décodeur)
             var currentSampleRate = 44100
+            var currentChannels = 1 // Par défaut
             var samplesPerPoint = currentSampleRate / POINTS_PER_SECOND
             
             while (true) {
@@ -109,14 +125,16 @@ object AudioHelper {
                 
                 val outIdx = decoder.dequeueOutputBuffer(info, 5000)
                 
-                // --- DETECTION CHANGEMENT FREQUENCE (Vital pour MP3 48kHz) ---
                 if (outIdx == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
                     val newFormat = decoder.outputFormat
-                    if (newFormat.containsKey(MediaFormat.KEY_SAMPLE_RATE)) {
-                        currentSampleRate = newFormat.getInteger(MediaFormat.KEY_SAMPLE_RATE)
-                        // Recalcul du ratio pour maintenir la synchro temporelle
-                        samplesPerPoint = currentSampleRate / POINTS_PER_SECOND
-                    }
+                    currentSampleRate = newFormat.getInteger(MediaFormat.KEY_SAMPLE_RATE)
+                    // CORRECTION MAJEURE : On récupère le nombre de canaux
+                    currentChannels = if (newFormat.containsKey(MediaFormat.KEY_CHANNEL_COUNT)) {
+                        newFormat.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
+                    } else 1
+                    
+                    // Le nombre total de samples (L+R) pour faire 20ms
+                    samplesPerPoint = (currentSampleRate * currentChannels) / POINTS_PER_SECOND
                 }
                 
                 if (outIdx >= 0) {
@@ -129,7 +147,6 @@ object AudioHelper {
                             if (sample > maxPeak) maxPeak = sample
                             count++
                             
-                            // On coupe tous les X samples (X dépend de la fréquence réelle)
                             if (count >= samplesPerPoint) {
                                 tempBuf.add(maxPeak.coerceAtMost(1.0f))
                                 maxPeak = 0f
