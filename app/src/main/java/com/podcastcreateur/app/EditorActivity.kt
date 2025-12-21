@@ -154,7 +154,8 @@ class EditorActivity : AppCompatActivity() {
     }
 
     private fun applyZoom(newZoom: Float) {
-        val clampedZoom = newZoom.coerceIn(0.5f, 20.0f)
+        // ✅ CORRECTION : Permettre de dézoomer beaucoup plus (0.01 à 20)
+        val clampedZoom = newZoom.coerceIn(0.01f, 20.0f)
         
         val oldWidth = binding.waveformView.width
         val playheadRelativePos = if (oldWidth > 0 && metadata != null) {
@@ -176,7 +177,7 @@ class EditorActivity : AppCompatActivity() {
     }
 
     /**
-     * LECTURE AUDIO
+     * ✅ LECTURE AUDIO CORRIGÉE - Buffer size approprié
      */
     private fun playAudio() {
         val meta = metadata ?: return
@@ -234,18 +235,22 @@ class EditorActivity : AppCompatActivity() {
                 decoder.configure(format, null, null, 0)
                 decoder.start()
                 
+                // ✅ CORRECTION : Buffer size beaucoup plus grand pour éviter le ralentissement
                 val minBuf = AudioTrack.getMinBufferSize(
                     meta.sampleRate,
                     AudioFormat.CHANNEL_OUT_MONO,
                     AudioFormat.ENCODING_PCM_16BIT
                 )
                 
+                // Utiliser 4x le buffer minimum pour éviter les underruns
+                val bufferSize = minBuf * 4
+                
                 audioTrack = AudioTrack(
                     AudioManager.STREAM_MUSIC,
                     meta.sampleRate,
                     AudioFormat.CHANNEL_OUT_MONO,
                     AudioFormat.ENCODING_PCM_16BIT,
-                    minBuf,
+                    bufferSize,
                     AudioTrack.MODE_STREAM
                 )
                 
@@ -292,7 +297,8 @@ class EditorActivity : AppCompatActivity() {
                             outBuffer.order(ByteOrder.LITTLE_ENDIAN)
                             outBuffer.asShortBuffer().get(tempArray)
                             
-                            audioTrack?.write(tempArray, 0, tempArray.size)
+                            // ✅ CORRECTION : Write bloquant pour éviter le ralentissement
+                            audioTrack?.write(tempArray, 0, tempArray.size, AudioTrack.WRITE_BLOCKING)
                             
                             currentSample += tempArray.size
                             samplesSinceUpdate += tempArray.size
@@ -369,7 +375,7 @@ class EditorActivity : AppCompatActivity() {
     }
     
     /**
-     * COUPE
+     * ✅ COUPE OPTIMISÉE - Utilise trimAudio (streaming) au lieu de decodeToPCM (RAM)
      */
     private fun cutSelection() {
         val meta = metadata ?: return
@@ -385,31 +391,59 @@ class EditorActivity : AppCompatActivity() {
             .setTitle("Couper la sélection ?")
             .setMessage("La partie sélectionnée sera supprimée")
             .setPositiveButton("Oui") { _, _ ->
-                performCut(start, end, meta)
+                performCutOptimized(start, end, meta)
             }
             .setNegativeButton("Non", null)
             .show()
     }
     
-    private fun performCut(startSample: Int, endSample: Int, meta: AudioMetadata) {
+    /**
+     * ✅ NOUVELLE VERSION - Coupe en 2 parties sans charger tout en RAM
+     */
+    private fun performCutOptimized(startSample: Int, endSample: Int, meta: AudioMetadata) {
         binding.progressBar.visibility = View.VISIBLE
         
         lifecycleScope.launch(Dispatchers.IO) {
             try {
-                val content = AudioHelper.decodeToPCM(currentFile)
-                val pcmData = content.data
+                val startMs = (startSample * 1000L) / meta.sampleRate
+                val endMs = (endSample * 1000L) / meta.sampleRate
+                val totalDurationMs = meta.duration
                 
-                val beforeCut = pcmData.sliceArray(0 until startSample)
-                val afterCut = pcmData.sliceArray(endSample until pcmData.size)
-                val resultData = beforeCut + afterCut
+                // Partie 1 : Avant la coupe (0 -> startMs)
+                val part1 = File(currentFile.parent, "temp_part1_${System.currentTimeMillis()}.m4a")
+                val success1 = if (startMs > 0) {
+                    AudioHelper.trimAudio(currentFile, part1, 0, startMs, meta.sampleRate)
+                } else {
+                    false
+                }
                 
-                val tempFile = File(currentFile.parent, "temp_cut_${System.currentTimeMillis()}.m4a")
+                // Partie 2 : Après la coupe (endMs -> fin)
+                val part2 = File(currentFile.parent, "temp_part2_${System.currentTimeMillis()}.m4a")
+                val success2 = if (endMs < totalDurationMs) {
+                    AudioHelper.trimAudio(currentFile, part2, endMs, totalDurationMs, meta.sampleRate)
+                } else {
+                    false
+                }
                 
-                val success = AudioHelper.savePCMToAAC(resultData, tempFile, meta.sampleRate)
+                // Fusionner les 2 parties
+                val tempFinal = File(currentFile.parent, "temp_final_${System.currentTimeMillis()}.m4a")
+                val filesToMerge = mutableListOf<File>()
+                if (success1 && part1.exists()) filesToMerge.add(part1)
+                if (success2 && part2.exists()) filesToMerge.add(part2)
                 
-                if (success) {
+                val success = if (filesToMerge.isNotEmpty()) {
+                    AudioHelper.mergeFiles(filesToMerge, tempFinal)
+                } else {
+                    false
+                }
+                
+                // Nettoyer les fichiers temporaires
+                part1.delete()
+                part2.delete()
+                
+                if (success && tempFinal.exists()) {
                     currentFile.delete()
-                    tempFile.renameTo(currentFile)
+                    tempFinal.renameTo(currentFile)
                     
                     withContext(Dispatchers.Main) {
                         binding.waveformView.clearSelection()

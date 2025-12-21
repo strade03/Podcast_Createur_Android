@@ -117,13 +117,14 @@ class WaveformView @JvmOverloads constructor(
     
     /**
      * Ajuste le zoom (nombre de points visibles)
+     * ✅ CORRECTION : Permettre de dézoomer beaucoup plus (jusqu'à 50000 points)
      */
     fun setZoomLevel(factor: Float) {
         // Plus le facteur est élevé, moins on voit de points (zoom in)
         // factor = 1.0 -> 500 points (10 sec)
-        // factor = 2.0 -> 250 points (5 sec)
-        // factor = 0.5 -> 1000 points (20 sec)
-        pointsVisibleOnScreen = (500 / factor).roundToInt().coerceIn(100, 10000)
+        // factor = 0.1 -> 5000 points (100 sec)
+        // factor = 0.01 -> 50000 points (1000 sec = 16 min)
+        pointsVisibleOnScreen = (500 / factor).roundToInt().coerceIn(100, 100000)
         requestLayout()
         invalidate()
     }
@@ -161,7 +162,13 @@ class WaveformView @JvmOverloads constructor(
         // Dessiner la waveform
         val pixelsPerPoint = w / waveformData.size
         
-        for (i in waveformData.indices) {
+        // ✅ OPTIMISATION : Ne dessiner que les points visibles à l'écran
+        val scrollX = (parent as? View)?.scrollX ?: 0
+        val screenWidth = resources.displayMetrics.widthPixels
+        val startIndex = ((scrollX / pixelsPerPoint).toInt() - 10).coerceAtLeast(0)
+        val endIndex = (((scrollX + screenWidth) / pixelsPerPoint).toInt() + 10).coerceAtMost(waveformData.size - 1)
+        
+        for (i in startIndex..endIndex) {
             val x = i * pixelsPerPoint
             val amplitude = waveformData[i]
             val scaledH = amplitude * centerY * 0.95f // 95% de la hauteur max
