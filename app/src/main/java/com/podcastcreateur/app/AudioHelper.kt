@@ -21,13 +21,13 @@ data class AudioContent(
 object AudioHelper {
     private const val BIT_RATE = 128000
     
-    // Pour l'affichage : on garde 1 point pour X samples.
-    // À 44100Hz, si on garde 1 point tous les 882 samples, on a 50 points par seconde.
-    // C'est très fluide et permet un zoom précis.
+    // Pour l'affichage : on garde 1 point pour ~882 samples.
+    // À 44100Hz, cela fait environ 50 points par seconde.
+    // Cela permet un zoom fluide sans saturer la mémoire avec des millions de points.
     private const val SAMPLES_PER_POINT = 882 
 
     /**
-     * Récupère rapidement les métadonnées
+     * Récupère les infos du fichier (durée, fréquence) sans tout lire.
      */
     fun getAudioMetadata(input: File): AudioMetadata? {
         if (!input.exists()) return null
@@ -50,6 +50,8 @@ object AudioHelper {
             val sampleRate = try { format.getInteger(MediaFormat.KEY_SAMPLE_RATE) } catch (e: Exception) { 44100 }
             val channelCount = try { format.getInteger(MediaFormat.KEY_CHANNEL_COUNT) } catch (e: Exception) { 1 }
             val duration = try { format.getLong(MediaFormat.KEY_DURATION) / 1000 } catch (e: Exception) { 0L }
+            
+            // Calcul précis du nombre total d'échantillons
             val totalSamples = (duration * sampleRate) / 1000
             
             return AudioMetadata(sampleRate, channelCount, duration, totalSamples)
@@ -62,8 +64,8 @@ object AudioHelper {
     }
 
     /**
-     * Génère la waveform en mode "Streaming".
-     * @param onUpdate Appelé régulièrement avec les nouvelles données ajoutées.
+     * Génère la waveform en mode "Streaming" (Lecture par morceaux).
+     * Utilise la méthode PEAK (valeur max) comme Audacity.
      */
     fun loadWaveformStream(
         input: File,
@@ -100,14 +102,13 @@ object AudioHelper {
             decoder.start()
             
             val bufferInfo = MediaCodec.BufferInfo()
-            val tempBuffer = ArrayList<Float>() // Tampon pour envoyer des blocs à l'UI
+            val tempBuffer = ArrayList<Float>() 
             var maxPeakInChunk = 0f
             var sampleCountInChunk = 0
             
             var isInputDone = false
-            
-            // On envoie une mise à jour à l'UI tous les X points générés pour fluidifier
-            val updateThreshold = 200 // Envoyer tous les 200 points (approx 4 sec d'audio)
+            // On envoie les données à l'UI tous les 200 points générés
+            val updateThreshold = 200 
 
             while (true) {
                 if (!isInputDone) {
@@ -135,19 +136,20 @@ object AudioHelper {
                         val shorts = outBuffer.asShortBuffer()
                         
                         while (shorts.hasRemaining()) {
-                            // On prend la valeur ABSOLUE (Peak) pour ressembler à Audacity
+                            // Calcul du PEAK (Valeur absolue / Max possible)
                             val sample = abs(shorts.get().toFloat() / 32768f)
                             
                             if (sample > maxPeakInChunk) maxPeakInChunk = sample
                             sampleCountInChunk++
                             
-                            // Downsampling : on garde le MAX trouvé dans le bloc de SAMPLES_PER_POINT
+                            // Downsampling : on garde 1 point max tous les X samples
                             if (sampleCountInChunk >= SAMPLES_PER_POINT) {
-                                tempBuffer.add(maxPeakInChunk)
+                                // On limite à 1.0f pour éviter les bugs d'affichage si le fichier sature
+                                tempBuffer.add(maxPeakInChunk.coerceAtMost(1.0f))
                                 maxPeakInChunk = 0f
                                 sampleCountInChunk = 0
                                 
-                                // Envoyer à l'UI par paquets
+                                // Envoi par paquet à l'interface
                                 if (tempBuffer.size >= updateThreshold) {
                                     onUpdate(tempBuffer.toFloatArray())
                                     tempBuffer.clear()
@@ -162,7 +164,7 @@ object AudioHelper {
                 }
             }
             
-            // Envoyer le reste
+            // Envoyer le reste des données
             if (tempBuffer.isNotEmpty()) {
                 onUpdate(tempBuffer.toFloatArray())
             }
@@ -178,9 +180,13 @@ object AudioHelper {
     }
 
     // ==========================================================
-    // FONCTIONS EXISTANTES (Coupe, Normalisation, Merge)
+    // FONCTIONS EXISTANTES (Nécessaires pour l'édition)
     // ==========================================================
 
+    /**
+     * Décode tout le fichier en PCM (ShortArray).
+     * Nécessaire pour couper/coller précisément.
+     */
     fun decodeToPCM(input: File): AudioContent {
         if (!input.exists()) return AudioContent(ShortArray(0), 44100)
         val extractor = MediaExtractor()
@@ -238,6 +244,9 @@ object AudioHelper {
         return AudioContent(shorts, actualSampleRate)
     }
 
+    /**
+     * Sauvegarde un tableau PCM (ShortArray) en fichier AAC/M4A.
+     */
     fun savePCMToAAC(pcmData: ShortArray, outputFile: File, sampleRate: Int): Boolean {
         var encoder: MediaCodec? = null
         var muxer: MediaMuxer? = null
@@ -295,11 +304,13 @@ object AudioHelper {
         finally { try{ encoder?.release(); muxer?.release() } catch(e:Exception){} }
     }
 
+    /**
+     * Normalisation audio (Gain).
+     */
     fun normalizeAudio(inputFile: File, outputFile: File, startMs: Long, endMs: Long, sampleRate: Int, targetPeak: Float, onProgress: (Float)->Unit): Boolean {
         try {
             val content = decodeToPCM(inputFile)
             onProgress(0.5f)
-            // Trouver max
             var maxVal = 0f
             val startIdx = ((startMs * sampleRate)/1000).toInt()
             val endIdx = ((endMs * sampleRate)/1000).toInt().coerceAtMost(content.data.size)
@@ -318,6 +329,9 @@ object AudioHelper {
         } catch(e: Exception) { return false }
     }
     
+    /**
+     * Fusion (Merge) de plusieurs fichiers.
+     */
     fun mergeFiles(inputs: List<File>, output: File): Boolean {
         if (inputs.isEmpty()) return false
         val allData = ArrayList<Short>()

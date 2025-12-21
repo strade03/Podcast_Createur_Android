@@ -20,22 +20,23 @@ import java.nio.ByteOrder
 import kotlin.math.abs
 
 /**
- * ÉDITEUR : Chargement Streaming et affichage Peak (type Audacity)
+ * ÉDITEUR :
+ * - Zoom initial ajusté (2.5f)
+ * - Correction lecture MP3 (détection sample rate)
+ * - Waveform Streaming
  */
 class EditorActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityEditorBinding
     private lateinit var currentFile: File
     
-    // On ne stocke plus tout ici, la vue gère ses données
     private var metadata: AudioMetadata? = null
-    
     private var audioTrack: AudioTrack? = null
     private var isPlaying = false
     private var playbackJob: Job? = null
     
-    // Zoom par défaut élevé pour voir les détails (type "1 minute sur l'écran")
-    private var currentZoom = 10.0f 
+    // ZOOM INITIAL AJUSTÉ (2.5f au lieu de 10.0f) pour voir plus large au début
+    private var currentZoom = 2.5f 
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -48,7 +49,7 @@ class EditorActivity : AppCompatActivity() {
         
         binding.txtFilename.text = currentFile.name.replace(Regex("^\\d{3}_"), "")
         
-        // Initialisation de la vue avec Zoom
+        // Initialisation de la vue avec le Zoom par défaut
         binding.waveformView.setZoomLevel(currentZoom)
         
         loadWaveformStreaming()
@@ -67,7 +68,6 @@ class EditorActivity : AppCompatActivity() {
         binding.btnZoomOut.setOnClickListener { applyZoom(currentZoom / 1.5f) }
         
         binding.btnReRecord.setOnClickListener {
-            // Logique re-record inchangée
             AlertDialog.Builder(this).setTitle("Refaire ?").setPositiveButton("Oui") { _, _ ->
                 stopAudio()
                 val regex = Regex("^(\\d{3}_)(.*)\\.(.*)$")
@@ -89,7 +89,7 @@ class EditorActivity : AppCompatActivity() {
         binding.progressBar.visibility = View.VISIBLE
         
         lifecycleScope.launch(Dispatchers.IO) {
-            // 1. Métadonnées (Rapide)
+            // Récupération métadonnées
             metadata = AudioHelper.getAudioMetadata(currentFile)
             val meta = metadata
             
@@ -100,16 +100,13 @@ class EditorActivity : AppCompatActivity() {
 
             withContext(Dispatchers.Main) {
                 binding.txtDuration.text = formatTime(meta.duration)
-                // On informe la vue de la durée totale estimée pour gérer le scroll
                 binding.waveformView.initialize(meta.totalSamples)
             }
 
-            // 2. Chargement Streaming (L'onde apparait petit à petit)
+            // Chargement de l'onde morceau par morceau
             AudioHelper.loadWaveformStream(currentFile) { newChunk ->
-                // Mise à jour UI thread
                 runOnUiThread {
                     binding.waveformView.appendData(newChunk)
-                    // Si c'est le premier chunk, on cache la progress bar
                     if (binding.progressBar.visibility == View.VISIBLE) {
                         binding.progressBar.visibility = View.GONE
                     }
@@ -126,12 +123,8 @@ class EditorActivity : AppCompatActivity() {
     }
 
     private fun applyZoom(newZoom: Float) {
-        // Limites de zoom plus larges
         val clamped = newZoom.coerceIn(0.5f, 50.0f)
         currentZoom = clamped
-        
-        val meta = metadata ?: return
-        // Garder le curseur centré
         val centerSample = binding.waveformView.getCenterSample(binding.scroller.scrollX, binding.scroller.width)
         
         binding.waveformView.setZoomLevel(currentZoom)
@@ -167,10 +160,18 @@ class EditorActivity : AppCompatActivity() {
                 extractor.selectTrack(idx)
                 val format = extractor.getTrackFormat(idx)
                 
-                // Début de lecture (Sélection ou Playhead)
+                // --- CORRECTION MP3 RALENTI ---
+                // On utilise le sample rate RÉEL du format de piste, pas celui global estimé
+                val actualSampleRate = try {
+                    format.getInteger(MediaFormat.KEY_SAMPLE_RATE)
+                } catch(e: Exception) { 
+                    meta.sampleRate 
+                }
+
                 val startSample = if(binding.waveformView.selectionStart >= 0) binding.waveformView.selectionStart else binding.waveformView.playheadPos
                 val endSample = if(binding.waveformView.selectionEnd > startSample) binding.waveformView.selectionEnd else meta.totalSamples.toInt()
                 
+                // Utilisation de meta.sampleRate pour le calcul de position temporelle (cohérence waveform)
                 val startMs = (startSample * 1000L) / meta.sampleRate
                 extractor.seekTo(startMs * 1000, MediaExtractor.SEEK_TO_CLOSEST_SYNC)
                 
@@ -179,8 +180,9 @@ class EditorActivity : AppCompatActivity() {
                 decoder.configure(format, null, null, 0)
                 decoder.start()
                 
-                val minBuf = AudioTrack.getMinBufferSize(meta.sampleRate, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT)
-                track = AudioTrack(AudioManager.STREAM_MUSIC, meta.sampleRate, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT, minBuf, AudioTrack.MODE_STREAM)
+                // Utilisation de actualSampleRate pour l'AudioTrack (pour que la vitesse soit bonne)
+                val minBuf = AudioTrack.getMinBufferSize(actualSampleRate, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT)
+                track = AudioTrack(AudioManager.STREAM_MUSIC, actualSampleRate, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT, minBuf, AudioTrack.MODE_STREAM)
                 track.play()
                 audioTrack = track
                 
@@ -194,7 +196,7 @@ class EditorActivity : AppCompatActivity() {
                         if(inIdx >= 0) {
                             val buf = decoder.getInputBuffer(inIdx)
                             val sz = extractor.readSampleData(buf!!, 0)
-                            if(sz < 0 || (extractor.sampleTime/1000) > (endSample*1000L/meta.sampleRate)) {
+                            if(sz < 0) {
                                 decoder.queueInputBuffer(inIdx, 0, 0, 0, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
                                 isEOS = true
                             } else {
@@ -212,7 +214,6 @@ class EditorActivity : AppCompatActivity() {
                             outBuf.get(chunk)
                             track.write(chunk, 0, chunk.size)
                             
-                            // Conversion approximative bytes -> samples (16bit mono = 2 bytes)
                             val samplesRead = chunk.size / 2
                             currentS += samplesRead
                             
@@ -241,7 +242,6 @@ class EditorActivity : AppCompatActivity() {
         val px = binding.waveformView.sampleToPixel(sampleIdx)
         val screenCenter = binding.scroller.width / 2
         val target = (px - screenCenter).toInt().coerceAtLeast(0)
-        // Scroll doux seulement si on est loin
         if (abs(binding.scroller.scrollX - target) > 10) {
             binding.scroller.scrollTo(target, 0)
         }
@@ -256,7 +256,6 @@ class EditorActivity : AppCompatActivity() {
     }
 
     private fun cutSelection() {
-        // Idem version précédente, reload complet après cut
         val meta = metadata ?: return
         val start = binding.waveformView.selectionStart
         val end = binding.waveformView.selectionEnd
@@ -264,19 +263,27 @@ class EditorActivity : AppCompatActivity() {
         
         binding.progressBar.visibility = View.VISIBLE
         lifecycleScope.launch(Dispatchers.IO) {
-            // ... Logique de coupe identique à avant ...
-            // Simplification ici : on recharge tout après la coupe
             val content = AudioHelper.decodeToPCM(currentFile)
             val pcm = content.data
-            val kept = pcm.sliceArray(0 until start) + pcm.sliceArray(end until pcm.size)
-            val tmp = File(currentFile.parent, "tmp.m4a")
-            if(AudioHelper.savePCMToAAC(kept, tmp, meta.sampleRate)) {
-                currentFile.delete(); tmp.renameTo(currentFile)
-                withContext(Dispatchers.Main) {
-                    binding.waveformView.clearData()
-                    loadWaveformStreaming()
-                    Toast.makeText(this@EditorActivity, "Coupé", Toast.LENGTH_SHORT).show()
+            // Sécurité bornes
+            val sSafe = start.coerceIn(0, pcm.size)
+            val eSafe = end.coerceIn(0, pcm.size)
+            
+            if(sSafe < eSafe) {
+                val kept = pcm.sliceArray(0 until sSafe) + pcm.sliceArray(eSafe until pcm.size)
+                val tmp = File(currentFile.parent, "tmp.m4a")
+                if(AudioHelper.savePCMToAAC(kept, tmp, meta.sampleRate)) {
+                    currentFile.delete(); tmp.renameTo(currentFile)
+                    withContext(Dispatchers.Main) {
+                        binding.waveformView.clearData()
+                        loadWaveformStreaming()
+                        Toast.makeText(this@EditorActivity, "Coupé", Toast.LENGTH_SHORT).show()
+                    }
                 }
+            } else {
+                 withContext(Dispatchers.Main) {
+                     binding.progressBar.visibility = View.GONE
+                 }
             }
         }
     }

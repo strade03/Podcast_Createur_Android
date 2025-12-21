@@ -14,18 +14,9 @@ class WaveformView @JvmOverloads constructor(
     context: Context, attrs: AttributeSet? = null
 ) : View(context, attrs) {
 
-    // On stocke les points (Peaks) au lieu de tout recalculer
     private val points = ArrayList<Float>()
-    
-    // Total estimé (pour définir la largeur du scroll avant que tout soit chargé)
     private var totalSamplesEstimate = 0L
-    
-    // Facteur fixe : 1 point = 882 samples (pour 44.1kHz -> 50pts/sec)
     private val samplesPerPoint = 882
-    
-    // Zoom : Nombre de pixels par Point.
-    // Zoom 1.0 = 1 pixel par point (très compressé). 
-    // Zoom 10.0 = 10 pixels par point (large).
     private var zoomFactor = 1.0f 
 
     var selectionStart = -1
@@ -33,10 +24,10 @@ class WaveformView @JvmOverloads constructor(
     var playheadPos = 0
 
     private val paint = Paint().apply {
-        color = Color.parseColor("#3F51B5") // Bleu Indigo
+        color = Color.parseColor("#3F51B5")
         strokeWidth = 2f
         style = Paint.Style.STROKE
-        isAntiAlias = false // Plus rapide
+        isAntiAlias = false 
     }
     
     private val centerLinePaint = Paint().apply {
@@ -45,7 +36,7 @@ class WaveformView @JvmOverloads constructor(
     }
     
     private val selectionPaint = Paint().apply {
-        color = Color.parseColor("#44FFEB3B") // Jaune semi-transparent
+        color = Color.parseColor("#44FFEB3B")
         style = Paint.Style.FILL
     }
     
@@ -55,6 +46,10 @@ class WaveformView @JvmOverloads constructor(
     }
 
     private var isSelectionMode = true
+    
+    // Pour gérer correctement le Drag
+    private var initialTouchX = 0f
+
     private val gestureDetector = GestureDetector(context, object : GestureDetector.SimpleOnGestureListener() {
         override fun onSingleTapUp(e: MotionEvent): Boolean {
             playheadPos = pixelToSample(e.x)
@@ -80,7 +75,7 @@ class WaveformView @JvmOverloads constructor(
 
     fun appendData(newPoints: FloatArray) {
         for(p in newPoints) points.add(p)
-        requestLayout() // Recalculer la largeur
+        requestLayout()
         invalidate()
     }
     
@@ -96,17 +91,13 @@ class WaveformView @JvmOverloads constructor(
         invalidate()
     }
 
-    // Calcul de la largeur totale de la vue
-    // Elle dépend du Zoom et du nombre total d'échantillons (estimé ou réel)
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
         val totalPoints = if (points.size > 0 && points.size * samplesPerPoint > totalSamplesEstimate) {
             points.size.toLong()
         } else {
             totalSamplesEstimate / samplesPerPoint
         }
-        
         val contentWidth = (totalPoints * zoomFactor).toInt()
-        
         val finalWidth = resolveSize(contentWidth, widthMeasureSpec)
         val finalHeight = getDefaultSize(suggestedMinimumHeight, heightMeasureSpec)
         setMeasuredDimension(contentWidth.coerceAtLeast(finalWidth), finalHeight)
@@ -118,39 +109,26 @@ class WaveformView @JvmOverloads constructor(
         val h = height.toFloat()
         val centerY = h / 2f
         
-        // Ligne centrale
         canvas.drawLine(0f, centerY, width.toFloat(), centerY, centerLinePaint)
 
-        // Optimisation : Ne dessiner que ce qui est visible à l'écran
-        // Le Parent est un HorizontalScrollView, mais on peut estimer la zone visible
-        // Ici on dessine tout car c'est une View standard, le GPU clippera.
-        // Pour ultra-optimisation, faudrait passer clipBounds.
-        
-        // On dessine des lignes verticales centrées (Peak)
-        // ZoomFactor détermine l'espacement entre chaque barre
-        
-        // val barWidth = (zoomFactor * 0.8f).coerceAtLeast(1f) // (Inutilisé, sert si drawRect)
-        
         for (i in points.indices) {
             val x = i * zoomFactor
-            
-            // Peak value (0.0 à 1.0)
             val valPeak = points[i] 
             
-            // Hauteur de la barre
-            val barHeight = valPeak * centerY * 1.8f // 1.8 pour laisser un peu de marge
+            // CORRECTION AFFICHAGE WAVEFORM
+            // On a remis un multiplicateur normal (0.95f) au lieu de 1.8f
+            // pour que l'onde ne soit pas coupée (saturation visuelle).
+            val barHeight = valPeak * centerY * 0.95f 
             
             canvas.drawLine(x, centerY - barHeight, x, centerY + barHeight, paint)
         }
 
-        // Dessin Sélection
         if (selectionStart >= 0 && selectionEnd > selectionStart) {
             val x1 = sampleToPixel(selectionStart)
             val x2 = sampleToPixel(selectionEnd)
             canvas.drawRect(x1, 0f, x2, h, selectionPaint)
         }
 
-        // Dessin Playhead
         val px = sampleToPixel(playheadPos)
         canvas.drawLine(px, 0f, px, h, playheadPaint)
     }
@@ -170,13 +148,22 @@ class WaveformView @JvmOverloads constructor(
         return pixelToSample(centerX.toFloat())
     }
 
+    // GESTION TACTILE CORRIGÉE POUR LA SÉLECTION
     override fun onTouchEvent(event: MotionEvent): Boolean {
         gestureDetector.onTouchEvent(event)
+        
+        // Empêcher le parent (ScrollView) de voler le focus si on est en train de sélectionner
+        parent?.requestDisallowInterceptTouchEvent(true)
+
         when(event.action) {
             MotionEvent.ACTION_DOWN -> {
-                selectionStart = pixelToSample(event.x)
-                selectionEnd = selectionStart
-                playheadPos = selectionStart
+                initialTouchX = event.x
+                // Au clic, on prépare une nouvelle sélection, 
+                // mais on ne l'affiche que si l'utilisateur bouge.
+                val s = pixelToSample(event.x)
+                selectionStart = s
+                selectionEnd = s
+                playheadPos = s
                 isSelectionMode = true
                 invalidate()
             }
@@ -187,14 +174,21 @@ class WaveformView @JvmOverloads constructor(
                     invalidate()
                 }
             }
-            MotionEvent.ACTION_UP -> {
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                parent?.requestDisallowInterceptTouchEvent(false)
+                
+                // Remise en ordre start < end
                 if(selectionStart > selectionEnd) {
                     val t = selectionStart; selectionStart = selectionEnd; selectionEnd = t
                 }
-                // Si tout petit clic, c'est juste un déplacement curseur
+                
+                // Si la sélection est minuscule (< 10 points), on considère ça comme un simple clic (pas de sélection)
                 if(abs(selectionEnd - selectionStart) < samplesPerPoint * 10) {
-                    selectionStart = -1; selectionEnd = -1
+                    selectionStart = -1
+                    selectionEnd = -1
                 }
+                
+                invalidate()
                 performClick()
             }
         }
