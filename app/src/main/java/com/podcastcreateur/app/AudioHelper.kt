@@ -14,7 +14,6 @@ object AudioHelper {
     private const val BIT_RATE = 128000
     const val POINTS_PER_SECOND = 50 
 
-    // --- UTILITAIRE INTERNE ---
     private fun getDurationAccurate(file: File): Long {
         val retriever = MediaMetadataRetriever()
         return try {
@@ -29,7 +28,6 @@ object AudioHelper {
         return File(audioFile.parent, audioFile.name + ".peak")
     }
 
-    // --- METADONNEES ---
     fun getAudioMetadata(input: File): AudioMetadata? {
         if (!input.exists()) return null
         val duration = getDurationAccurate(input)
@@ -48,7 +46,9 @@ object AudioHelper {
         return null
     }
 
-    // --- CHARGEMENT WAVEFORM (STYLE AUDACITY AVEC CACHE) ---
+    /**
+     * CHARGEMENT WAVEFORM (Ouverture < 1s si cache existe)
+     */
     fun loadWaveform(input: File, onUpdate: (FloatArray) -> Unit) {
         val cacheFile = getWaveformCacheFile(input)
         
@@ -66,37 +66,45 @@ object AudioHelper {
         val allPoints = mutableListOf<Float>()
         try {
             extractor.setDataSource(input.absolutePath)
-            val format = (0 until extractor.trackCount)
-                .map { extractor.getTrackFormat(it) }
-                .firstOrNull { it.getString(MediaFormat.KEY_MIME)?.startsWith("audio/") == true } ?: return
+            var trackIdx = -1
+            var format: MediaFormat? = null
+            for (i in 0 until extractor.trackCount) {
+                val f = extractor.getTrackFormat(i)
+                if (f.getString(MediaFormat.KEY_MIME)?.startsWith("audio/") == true) {
+                    trackIdx = i; format = f; break
+                }
+            }
+            if (trackIdx < 0 || format == null) return
+            extractor.selectTrack(trackIdx)
             
             val decoder = MediaCodec.createDecoderByType(format.getString(MediaFormat.KEY_MIME)!!)
             decoder.configure(format, null, null, 0)
             decoder.start()
 
             val info = MediaCodec.BufferInfo()
-            val sampleRate = format.getInteger(MediaFormat.KEY_SAMPLE_RATE)
-            val channels = format.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
-            val samplesPerPoint = (sampleRate * channels) / POINTS_PER_SECOND
+            var currentSampleRate = format.getInteger(MediaFormat.KEY_SAMPLE_RATE)
+            var currentChannels = format.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
+            var samplesPerPoint = (currentSampleRate * currentChannels) / POINTS_PER_SECOND
             
             val duration = getDurationAccurate(input)
             val step = if (duration > 300_000) 8 else 1 
 
             var maxPeak = 0f
             var sampleCount = 0
-            var isEOS = false
-            val tempChunk = FloatArray(1000)
+            var isInputEOS = false
+            var isOutputEOS = false
+            val tempChunk = FloatArray(200)
             var chunkIdx = 0
 
-            while (true) {
-                if (!isEOS) {
-                    val inIdx = decoder.dequeueInputBuffer(5000)
+            while (!isOutputEOS) {
+                if (!isInputEOS) {
+                    val inIdx = decoder.dequeueInputBuffer(10000)
                     if (inIdx >= 0) {
                         val buf = decoder.getInputBuffer(inIdx)
                         val sz = extractor.readSampleData(buf!!, 0)
                         if (sz < 0) {
                             decoder.queueInputBuffer(inIdx, 0, 0, 0, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
-                            isEOS = true
+                            isInputEOS = true
                         } else {
                             decoder.queueInputBuffer(inIdx, 0, sz, extractor.sampleTime, 0)
                             extractor.advance()
@@ -104,10 +112,10 @@ object AudioHelper {
                     }
                 }
 
-                val outIdx = decoder.dequeueOutputBuffer(info, 5000)
+                val outIdx = decoder.dequeueOutputBuffer(info, 10000)
                 if (outIdx >= 0) {
                     val outBuf = decoder.getOutputBuffer(outIdx)
-                    if (outBuf != null) {
+                    if (outBuf != null && info.size > 0) {
                         outBuf.order(ByteOrder.LITTLE_ENDIAN)
                         val shorts = outBuf.asShortBuffer()
                         while (shorts.hasRemaining()) {
@@ -115,26 +123,39 @@ object AudioHelper {
                             if (s > maxPeak) maxPeak = s
                             sampleCount += step
                             
+                            // Saut pour vitesse Audacity
                             if (step > 1 && shorts.hasRemaining()) {
-                                val next = (shorts.position() + step - 1).coerceAtMost(shorts.limit())
-                                shorts.position(next)
+                                val jump = (shorts.position() + step - 1).coerceAtMost(shorts.limit())
+                                shorts.position(jump)
                             }
 
                             if (sampleCount >= samplesPerPoint) {
                                 val p = maxPeak.coerceAtMost(1.0f)
-                                tempChunk[chunkIdx++] = p
+                                if (chunkIdx < tempChunk.size) tempChunk[chunkIdx++] = p
                                 allPoints.add(p)
                                 maxPeak = 0f; sampleCount = 0
-                                if (chunkIdx >= tempChunk.size) { onUpdate(tempChunk.copyOf()); chunkIdx = 0 }
+                                
+                                if (chunkIdx >= tempChunk.size) {
+                                    onUpdate(tempChunk.copyOf())
+                                    chunkIdx = 0
+                                }
                             }
                         }
                     }
                     decoder.releaseOutputBuffer(outIdx, false)
-                    if (info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) break
-                } else if (isEOS && outIdx == MediaCodec.INFO_TRY_AGAIN_LATER) break
+                    if (info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) isOutputEOS = true
+                } else if (outIdx == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
+                    currentSampleRate = decoder.outputFormat.getInteger(MediaFormat.KEY_SAMPLE_RATE)
+                    currentChannels = decoder.outputFormat.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
+                    samplesPerPoint = (currentSampleRate * currentChannels) / POINTS_PER_SECOND
+                } else if (outIdx == MediaCodec.INFO_TRY_AGAIN_LATER && isInputEOS) {
+                    isOutputEOS = true
+                }
             }
+            
             if (chunkIdx > 0) onUpdate(tempChunk.copyOfRange(0, chunkIdx))
             
+            // Sauvegarde Cache Peak
             val cacheBuf = ByteBuffer.allocate(allPoints.size * 4).order(ByteOrder.LITTLE_ENDIAN)
             allPoints.forEach { cacheBuf.putFloat(it) }
             cacheFile.writeBytes(cacheBuf.array())
@@ -143,7 +164,9 @@ object AudioHelper {
         } catch (e: Exception) { e.printStackTrace() }
     }
 
-    // --- DECODAGE MONO-MIX (GAIN RAM 50%) ---
+    /**
+     * DÉCODAGE MONO (Optimisé RAM pour fichiers 1h+)
+     */
     fun decodeToPCM(input: File): AudioContent {
         val meta = getAudioMetadata(input) ?: return AudioContent(ShortArray(0), 44100, 1)
         val extractor = MediaExtractor()
@@ -163,28 +186,29 @@ object AudioHelper {
             codec.start()
 
             val totalExpectedSamples = ((meta.duration * meta.sampleRate) / 1000).toInt()
-            val finalPcm = ShortArray(totalExpectedSamples + 10000)
+            val finalPcm = ShortArray(totalExpectedSamples + 50000) // Marge
             var writeOffset = 0
             val info = MediaCodec.BufferInfo()
-            var isEOS = false
+            var isInputEOS = false
+            var isOutputEOS = false
             val channels = meta.channelCount
 
-            while (true) {
-                if (!isEOS) {
-                    val inIdx = codec.dequeueInputBuffer(5000)
+            while (!isOutputEOS) {
+                if (!isInputEOS) {
+                    val inIdx = codec.dequeueInputBuffer(10000)
                     if (inIdx >= 0) {
                         val buf = codec.getInputBuffer(inIdx)
                         val sz = extractor.readSampleData(buf!!, 0)
                         if (sz < 0) {
                             codec.queueInputBuffer(inIdx, 0, 0, 0, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
-                            isEOS = true
+                            isInputEOS = true
                         } else {
                             codec.queueInputBuffer(inIdx, 0, sz, extractor.sampleTime, 0)
                             extractor.advance()
                         }
                     }
                 }
-                val outIdx = decoderDequeue(codec, info)
+                val outIdx = codec.dequeueOutputBuffer(info, 10000)
                 if (outIdx >= 0) {
                     val outBuf = codec.getOutputBuffer(outIdx)
                     if (outBuf != null) {
@@ -201,19 +225,16 @@ object AudioHelper {
                         }
                     }
                     codec.releaseOutputBuffer(outIdx, false)
-                    if (info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) break
-                } else if (isEOS && outIdx == MediaCodec.INFO_TRY_AGAIN_LATER) break
+                    if (info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) isOutputEOS = true
+                } else if (outIdx == MediaCodec.INFO_TRY_AGAIN_LATER && isInputEOS) {
+                    isOutputEOS = true
+                }
             }
             codec.stop(); codec.release(); extractor.release()
             return AudioContent(finalPcm.copyOfRange(0, writeOffset), meta.sampleRate, 1)
         } catch (e: Exception) { return AudioContent(ShortArray(0), 44100, 1) }
     }
 
-    private fun decoderDequeue(codec: MediaCodec, info: MediaCodec.BufferInfo): Int {
-        return try { codec.dequeueOutputBuffer(info, 5000) } catch (e: Exception) { -1 }
-    }
-
-    // --- ACTIONS D'EDITION ---
     fun generateWaveformFromPCM(content: AudioContent): FloatArray {
         val samplesPerPoint = content.sampleRate / POINTS_PER_SECOND
         if (samplesPerPoint <= 0) return floatArrayOf()
@@ -288,28 +309,6 @@ object AudioHelper {
             return true
         } catch (e: Exception) { e.printStackTrace(); return false } 
         finally { try { enc?.release(); mux?.release() } catch (e: Exception) {} }
-    }
-
-    // --- FONCTIONS MANQUANTES (FIX COMPILATION) ---
-    
-    fun normalizeAudio(inputFile: File, outputFile: File, startMs: Long, endMs: Long, sampleRate: Int, targetPeak: Float, onProgress: (Float) -> Unit): Boolean {
-        val content = decodeToPCM(inputFile)
-        if (content.data.isEmpty()) return false
-        onProgress(0.5f)
-        var maxVal = 0f
-        val startIdx = ((startMs * sampleRate) / 1000).toInt()
-        val endIdx = ((endMs * sampleRate) / 1000).toInt().coerceAtMost(content.data.size)
-        for (i in startIdx until endIdx) {
-            val v = abs(content.data[i].toFloat() / 32768f)
-            if (v > maxVal) maxVal = v
-        }
-        if (maxVal == 0f) return false
-        val gain = targetPeak / maxVal
-        for (i in startIdx until endIdx) {
-            content.data[i] = (content.data[i] * gain).toInt().coerceIn(-32768, 32767).toShort()
-        }
-        onProgress(0.8f)
-        return savePCMToAAC(content.data, outputFile, sampleRate, 1)
     }
 
     fun mergeFiles(inputs: List<File>, output: File): Boolean {

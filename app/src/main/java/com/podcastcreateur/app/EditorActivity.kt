@@ -64,7 +64,6 @@ class EditorActivity : AppCompatActivity() {
     private fun loadEditorData() {
         binding.progressBar.visibility = View.VISIBLE
         
-        // 1. Affichage WAVEFORM (Ultra rapide via Cache ou Scan optimisé)
         lifecycleScope.launch(Dispatchers.IO) {
             metadata = AudioHelper.getAudioMetadata(currentFile)
             val meta = metadata ?: return@launch
@@ -74,6 +73,7 @@ class EditorActivity : AppCompatActivity() {
                 binding.waveformView.initialize((meta.duration / 1000) * AudioHelper.POINTS_PER_SECOND)
             }
 
+            // Task 1: Waveform Rapide
             AudioHelper.loadWaveform(currentFile) { newChunk ->
                 runOnUiThread {
                     binding.waveformView.appendData(newChunk)
@@ -82,12 +82,12 @@ class EditorActivity : AppCompatActivity() {
             }
         }
 
-        // 2. Décodage PCM de fond (Pour l'édition instantanée)
+        // Task 2: Décodage PCM fond
         lifecycleScope.launch(Dispatchers.IO) {
             val content = AudioHelper.decodeToPCM(currentFile)
             workingPcm = content.data
             sampleRate = content.sampleRate
-            currentChannels = 1 // Toujours 1 car on mixe en mono pour la RAM
+            currentChannels = 1 
             withContext(Dispatchers.Main) { updateEditButtons(true) }
         }
     }
