@@ -308,6 +308,27 @@ object AudioHelper {
         }
     }
 
+    fun generateWaveformFromPCM(pcmData: ShortArray, sampleRate: Int): FloatArray {
+        val samplesPerPoint = sampleRate / POINTS_PER_SECOND
+        if (samplesPerPoint == 0) return floatArrayOf()
+        
+        val pointCount = pcmData.size / samplesPerPoint
+        val waveform = FloatArray(pointCount)
+        
+        for (i in 0 until pointCount) {
+            var max = 0f
+            // On regarde le pic sur les 20ms de son
+            for (j in 0 until samplesPerPoint) {
+                val idx = i * samplesPerPoint + j
+                if (idx >= pcmData.size) break
+                val sample = abs(pcmData[idx].toFloat() / 32768f)
+                if (sample > max) max = sample
+            }
+            waveform[i] = max.coerceAtMost(1.0f)
+        }
+        return waveform
+    }
+    
     fun decodeToPCM(input: File): AudioContent {
         if (!input.exists()) return AudioContent(ShortArray(0), 44100)
         val ex = MediaExtractor(); try{ex.setDataSource(input.absolutePath)}catch(e:Exception){return AudioContent(ShortArray(0),44100)}
