@@ -22,8 +22,6 @@ data class AudioContent(
 
 object AudioHelper {
     private const val BIT_RATE = 128000
-    
-    // CIBLE : 50 points par seconde (1 point = 20ms)
     const val POINTS_PER_SECOND = 50 
 
     private fun getDurationAccurate(file: File): Long {
@@ -63,10 +61,14 @@ object AudioHelper {
     }
 
     /**
-     * Utilisé pour l'affichage initial rapide (Streaming)
+     * Génération ultra-rapide de l'onde (Streaming)
      */
     fun loadWaveformStream(input: File, onUpdate: (FloatArray) -> Unit) {
         if (!input.exists()) { onUpdate(FloatArray(0)); return }
+        
+        // FIX : On récupère la durée pour calculer le 'step' d'optimisation
+        val accurateDuration = getDurationAccurate(input)
+        
         val extractor = MediaExtractor()
         try {
             extractor.setDataSource(input.absolutePath)
@@ -92,6 +94,9 @@ object AudioHelper {
             var currentChannels = 1
             var samplesPerPoint = currentSampleRate / POINTS_PER_SECOND
             
+            // OPTIMISATION : Si le fichier est long (> 5 min), on ne lit qu'un échantillon sur 8
+            val step = if (accurateDuration > 300_000) 8 else 1 
+
             while (true) {
                 if (!isEOS) {
                     val inIdx = decoder.dequeueInputBuffer(5000)
@@ -121,17 +126,12 @@ object AudioHelper {
                         outBuf.order(ByteOrder.LITTLE_ENDIAN)
                         val shorts = outBuf.asShortBuffer()
                         
-                        // --- OPTIMISATION : SAUT D'ÉCHANTILLONS ---
-                        // Au lieu de lire TOUS les samples, on en lit 1 sur 8 si le fichier est long
-                        // Cela réduit drastiquement les calculs CPU
-                        val step = if (accurateDuration > 300_000) 8 else 1 
-                        
                         while (shorts.hasRemaining()) {
                             val sample = abs(shorts.get().toFloat() / 32768f)
                             if (sample > maxPeak) maxPeak = sample
                             count += step
                             
-                            // On avance manuellement dans le buffer pour sauter les samples inutiles
+                            // Saut d'échantillons pour économiser le CPU sur les gros fichiers
                             if (step > 1 && shorts.hasRemaining()) {
                                 val nextPos = (shorts.position() + step - 1).coerceAtMost(shorts.limit())
                                 shorts.position(nextPos)
@@ -149,27 +149,8 @@ object AudioHelper {
                         }
                     }
                     decoder.releaseOutputBuffer(outIdx, false)
-                }
-
-                // if (outIdx >= 0) {
-                //     val outBuf = decoder.getOutputBuffer(outIdx)
-                //     if (outBuf != null && info.size > 0) {
-                //         outBuf.order(ByteOrder.LITTLE_ENDIAN)
-                //         val shorts = outBuf.asShortBuffer()
-                //         while (shorts.hasRemaining()) {
-                //             val sample = abs(shorts.get().toFloat() / 32768f)
-                //             if (sample > maxPeak) maxPeak = sample
-                //             count++
-                //             if (count >= samplesPerPoint) {
-                //                 tempBuf.add(maxPeak.coerceAtMost(1.0f))
-                //                 maxPeak = 0f; count = 0
-                //                 if (tempBuf.size >= 200) { onUpdate(tempBuf.toFloatArray()); tempBuf.clear() }
-                //             }
-                //         }
-                //     }
-                //     decoder.releaseOutputBuffer(outIdx, false)
-                //     if (info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) break
-                // } else if (outIdx == MediaCodec.INFO_TRY_AGAIN_LATER && isEOS) break
+                    if (info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) break
+                } else if (outIdx == MediaCodec.INFO_TRY_AGAIN_LATER && isEOS) break
             }
             if (tempBuf.isNotEmpty()) onUpdate(tempBuf.toFloatArray())
             decoder.stop(); decoder.release()
@@ -178,12 +159,10 @@ object AudioHelper {
     }
 
     /**
-     * Décode tout le fichier en mémoire. Indispensable pour une édition fluide.
+     * Décode tout le fichier en mémoire vive (Mono-Mixing pour économiser la RAM)
      */
     fun decodeToPCM(input: File): AudioContent {
         val meta = getAudioMetadata(input) ?: return AudioContent(ShortArray(0), 44100, 1)
-        if (meta.duration > 5400_000) { /* Optionnel : limiter ici */ }
-
         val extractor = MediaExtractor()
         
         try {
@@ -201,8 +180,8 @@ object AudioHelper {
             codec.configure(format, null, null, 0)
             codec.start()
 
-            // PRÉ-ALLOCATION : On connaît la taille grâce aux métadonnées (durée * sampleRate * channels)
-            val totalExpectedSamples = ((meta.duration * meta.sampleRate * meta.channelCount) / 1000).toInt()
+            // PRÉ-ALLOCATION : On pré-alloue pour du MONO (gain de 50% de RAM sur fichiers stéréo)
+            val totalExpectedSamples = ((meta.duration * meta.sampleRate) / 1000).toInt()
             val finalPcm = ShortArray(totalExpectedSamples)
             var writeOffset = 0
 
@@ -227,42 +206,36 @@ object AudioHelper {
                 }
 
                 val outIdx = codec.dequeueOutputBuffer(info, 5000)
-                        if (outIdx >= 0) {
-                            val outBuf = codec.getOutputBuffer(outIdx)
-                            if (outBuf != null && info.size > 0) {
-                                outBuf.order(ByteOrder.LITTLE_ENDIAN)
-                                val shorts = outBuf.asShortBuffer()
-                                
-                                while (shorts.hasRemaining()) {
-                                    if (currentChannels == 2) {
-                                        // MIXAGE STÉRÉO -> MONO (Moyenne des deux canaux)
-                                        val left = shorts.get().toInt()
-                                        val right = if (shorts.hasRemaining()) shorts.get().toInt() else left
-                                        val mono = ((left + right) / 2).toShort()
-                                        if (writeOffset < finalPcm.size) finalPcm[writeOffset++] = mono
-                                    } else {
-                                        // DÉJÀ MONO
-                                        if (writeOffset < finalPcm.size) finalPcm[writeOffset++] = shorts.get()
-                                    }
-                                }
+                if (outIdx >= 0) {
+                    val outBuf = codec.getOutputBuffer(outIdx)
+                    if (outBuf != null && info.size > 0) {
+                        outBuf.order(ByteOrder.LITTLE_ENDIAN)
+                        val shorts = outBuf.asShortBuffer()
+                        
+                        while (shorts.hasRemaining()) {
+                            if (currentChannels == 2) {
+                                // MIXAGE STÉRÉO -> MONO (Moyenne)
+                                val left = shorts.get().toInt()
+                                val right = if (shorts.hasRemaining()) shorts.get().toInt() else left
+                                val mono = ((left + right) / 2).toShort()
+                                if (writeOffset < finalPcm.size) finalPcm[writeOffset++] = mono
+                            } else {
+                                if (writeOffset < finalPcm.size) finalPcm[writeOffset++] = shorts.get()
                             }
-                            codec.releaseOutputBuffer(outIdx, false)
-                            if (info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) break
-                        } else if (isEOS && outIdx == MediaCodec.INFO_TRY_AGAIN_LATER) break
+                        }
                     }
+                    codec.releaseOutputBuffer(outIdx, false)
+                    if (info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) break
+                } else if (isEOS && outIdx == MediaCodec.INFO_TRY_AGAIN_LATER) break
+            }
             
             codec.stop(); codec.release(); extractor.release()
-
-            // On retourne la partie réellement écrite (au cas où la durée estimée était un peu trop large)
             return AudioContent(finalPcm.copyOfRange(0, writeOffset), meta.sampleRate, 1)
         } catch (e: Exception) { 
             return AudioContent(ShortArray(0), 44100, 1) 
         }
     }
 
-    /**
-     * Génère l'onde à partir du PCM chargé en mémoire (Synchronisation parfaite)
-     */
     fun generateWaveformFromPCM(content: AudioContent): FloatArray {
         val samplesPerPoint = (content.sampleRate * content.channelCount) / POINTS_PER_SECOND
         if (samplesPerPoint <= 0) return floatArrayOf()
@@ -284,9 +257,6 @@ object AudioHelper {
         return waveform
     }
 
-    /**
-     * Sauvegarde du PCM vers AAC (.m4a)
-     */
     fun savePCMToAAC(pcmData: ShortArray, outputFile: File, sampleRate: Int, channelCount: Int): Boolean {
         var enc: MediaCodec? = null
         var mux: MediaMuxer? = null
@@ -348,7 +318,6 @@ object AudioHelper {
             if (content.data.isEmpty()) return false
             onProgress(0.5f)
             var maxVal = 0f
-            // Correction de l'index pour tenir compte des canaux
             val startIdx = ((startMs * sampleRate * content.channelCount) / 1000).toInt()
             val endIdx = ((endMs * sampleRate * content.channelCount) / 1000).toInt().coerceAtMost(content.data.size)
             
