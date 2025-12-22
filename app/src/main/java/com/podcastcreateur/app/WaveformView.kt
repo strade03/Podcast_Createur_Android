@@ -23,9 +23,6 @@ class WaveformView @JvmOverloads constructor(
     var playheadPos = 0
     
     var onPositionChanged: ((Int) -> Unit)? = null
-    
-    // 🔥 NOUVEAUTÉ : Zones coupées (visuellement)
-    private val cutRegions = mutableListOf<Pair<Int, Int>>() // Liste des (start, end) coupés
   
     private val paint = Paint().apply {
         color = Color.parseColor("#3F51B5")
@@ -35,13 +32,7 @@ class WaveformView @JvmOverloads constructor(
     }
 
     private val outOfBoundsPaint = Paint().apply {
-        color = Color.parseColor("#BDBDBD")
-        style = Paint.Style.FILL
-    }
-    
-    // 🔥 NOUVEAUTÉ : Paint pour les zones coupées
-    private val cutRegionPaint = Paint().apply {
-        color = Color.parseColor("#66FF0000") // Rouge semi-transparent
+        color = Color.parseColor("#BDBDBD") // Gris plus foncé pour le "vide"
         style = Paint.Style.FILL
     }
 
@@ -99,7 +90,6 @@ class WaveformView @JvmOverloads constructor(
         selectionStart = -1
         selectionEnd = -1
         playheadPos = 0
-        cutRegions.clear() // 🔥 Réinitialiser les coupes
         requestLayout()
         invalidate()
     }
@@ -121,18 +111,18 @@ class WaveformView @JvmOverloads constructor(
         selectionEnd = -1
         invalidate()
     }
-    
-    // 🔥 NOUVEAUTÉ : Marquer visuellement une zone comme coupée
-    fun applyCutVisually(startIdx: Int, endIdx: Int) {
-        cutRegions.add(Pair(startIdx, endIdx))
-        invalidate()
-    }
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
         val total = if (points.size > totalPointsEstimate) points.size.toLong() else totalPointsEstimate
         val contentWidth = (total * zoomFactor).toInt()
+        
+        // On récupère la largeur de l'écran (parent)
         val parentWidth = MeasureSpec.getSize(widthMeasureSpec)
+        
+        // On force la vue à être AU MOINS aussi large que l'écran + une marge de confort
+        // pour pouvoir scroller un peu après la fin
         val finalWidth = contentWidth.coerceAtLeast(parentWidth)
+        
         val finalHeight = getDefaultSize(suggestedMinimumHeight, heightMeasureSpec)
         setMeasuredDimension(finalWidth, finalHeight)
     }
@@ -143,7 +133,7 @@ class WaveformView @JvmOverloads constructor(
         val h = height.toFloat()
         val centerY = h / 2f
         
-        // Dessiner le fond de la zone "après le son"
+        // --- Dessiner le fond de la zone "après le son" ---
         val audioEndX = points.size * zoomFactor
         if (audioEndX < width) {
             canvas.drawRect(audioEndX, 0f, width.toFloat(), h, outOfBoundsPaint)
@@ -151,29 +141,19 @@ class WaveformView @JvmOverloads constructor(
 
         canvas.drawLine(0f, centerY, width.toFloat(), centerY, centerLinePaint)
 
-        // Dessiner la waveform
         for (i in points.indices) {
             val x = i * zoomFactor
             val valPeak = points[i] 
             val barHeight = valPeak * centerY * 0.95f 
             canvas.drawLine(x, centerY - barHeight, x, centerY + barHeight, paint)
         }
-        
-        // 🔥 NOUVEAUTÉ : Dessiner les zones coupées par-dessus
-        cutRegions.forEach { (start, end) ->
-            val x1 = sampleToPixel(start)
-            val x2 = sampleToPixel(end)
-            canvas.drawRect(x1, 0f, x2, h, cutRegionPaint)
-        }
 
-        // Dessiner la sélection actuelle
         if (selectionStart >= 0 && selectionEnd > selectionStart) {
             val x1 = sampleToPixel(selectionStart)
             val x2 = sampleToPixel(selectionEnd)
             canvas.drawRect(x1, 0f, x2, h, selectionPaint)
         }
 
-        // Dessiner le playhead
         val px = sampleToPixel(playheadPos)
         canvas.drawLine(px, 0f, px, h, playheadPaint)
     }
