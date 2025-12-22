@@ -51,7 +51,6 @@ object AudioHelper {
      */
     fun loadWaveform(input: File, onUpdate: (FloatArray) -> Unit) {
         val cacheFile = getWaveformCacheFile(input)
-        
         if (cacheFile.exists()) {
             try {
                 val bytes = cacheFile.readBytes()
@@ -66,96 +65,68 @@ object AudioHelper {
         val allPoints = mutableListOf<Float>()
         try {
             extractor.setDataSource(input.absolutePath)
-            var trackIdx = -1
-            var format: MediaFormat? = null
-            for (i in 0 until extractor.trackCount) {
-                val f = extractor.getTrackFormat(i)
-                if (f.getString(MediaFormat.KEY_MIME)?.startsWith("audio/") == true) {
-                    trackIdx = i; format = f; break
-                }
-            }
-            if (trackIdx < 0 || format == null) return
-            extractor.selectTrack(trackIdx)
+            val trackIdx = (0 until extractor.trackCount).firstOrNull { 
+                extractor.getTrackFormat(it).getString(MediaFormat.KEY_MIME)?.startsWith("audio/") == true 
+            } ?: return
             
+            val format = extractor.getTrackFormat(trackIdx)
+            val durationUs = format.getLong(MediaFormat.KEY_DURATION)
+            val durationMs = durationUs / 1000
+            
+            // --- STRATÉGIE AUDACITY : ÉCHANTILLONNAGE ---
+            // On va chercher 50 points par seconde, mais on ne décode qu'une fraction du fichier
+            val totalPointsNeeded = (durationMs / 1000) * POINTS_PER_SECOND
+            val seekStepUs = durationUs / totalPointsNeeded.coerceAtLeast(1)
+
             val decoder = MediaCodec.createDecoderByType(format.getString(MediaFormat.KEY_MIME)!!)
             decoder.configure(format, null, null, 0)
             decoder.start()
 
             val info = MediaCodec.BufferInfo()
-            var currentSampleRate = format.getInteger(MediaFormat.KEY_SAMPLE_RATE)
-            var currentChannels = format.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
-            var samplesPerPoint = (currentSampleRate * currentChannels) / POINTS_PER_SECOND
-            
-            val duration = getDurationAccurate(input)
-            val step = if (duration > 300_000) 8 else 1 
-
-            var maxPeak = 0f
-            var sampleCount = 0
-            var isInputEOS = false
-            var isOutputEOS = false
             val tempChunk = FloatArray(200)
             var chunkIdx = 0
 
-            while (!isOutputEOS) {
-                if (!isInputEOS) {
-                    val inIdx = decoder.dequeueInputBuffer(10000)
-                    if (inIdx >= 0) {
-                        val buf = decoder.getInputBuffer(inIdx)
-                        val sz = extractor.readSampleData(buf!!, 0)
-                        if (sz < 0) {
-                            decoder.queueInputBuffer(inIdx, 0, 0, 0, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
-                            isInputEOS = true
-                        } else {
-                            decoder.queueInputBuffer(inIdx, 0, sz, extractor.sampleTime, 0)
-                            extractor.advance()
-                        }
+            // On saute de position en position au lieu de lire linéairement
+            for (i in 0 until totalPointsNeeded.toInt()) {
+                val targetUs = i * seekStepUs
+                extractor.seekTo(targetUs, MediaExtractor.SEEK_TO_CLOSEST_SYNC)
+                
+                // On décode juste UNE frame à cette position
+                val inIdx = decoder.dequeueInputBuffer(5000)
+                if (inIdx >= 0) {
+                    val buf = decoder.getInputBuffer(inIdx)
+                    val sz = extractor.readSampleData(buf!!, 0)
+                    if (sz >= 0) {
+                        decoder.queueInputBuffer(inIdx, 0, sz, extractor.sampleTime, 0)
+                    } else {
+                        decoder.queueInputBuffer(inIdx, 0, 0, 0, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
                     }
                 }
 
-                val outIdx = decoder.dequeueOutputBuffer(info, 10000)
+                val outIdx = decoder.dequeueOutputBuffer(info, 5000)
                 if (outIdx >= 0) {
                     val outBuf = decoder.getOutputBuffer(outIdx)
                     if (outBuf != null && info.size > 0) {
                         outBuf.order(ByteOrder.LITTLE_ENDIAN)
-                        val shorts = outBuf.asShortBuffer()
-                        while (shorts.hasRemaining()) {
-                            val s = abs(shorts.get().toFloat() / 32768f)
-                            if (s > maxPeak) maxPeak = s
-                            sampleCount += step
-                            
-                            // Saut pour vitesse Audacity
-                            if (step > 1 && shorts.hasRemaining()) {
-                                val jump = (shorts.position() + step - 1).coerceAtMost(shorts.limit())
-                                shorts.position(jump)
-                            }
-
-                            if (sampleCount >= samplesPerPoint) {
-                                val p = maxPeak.coerceAtMost(1.0f)
-                                if (chunkIdx < tempChunk.size) tempChunk[chunkIdx++] = p
-                                allPoints.add(p)
-                                maxPeak = 0f; sampleCount = 0
-                                
-                                if (chunkIdx >= tempChunk.size) {
-                                    onUpdate(tempChunk.copyOf())
-                                    chunkIdx = 0
-                                }
-                            }
+                        // On prend juste le premier échantillon de la frame (suffisant pour l'onde globale)
+                        val sample = abs(outBuf.asShortBuffer().get().toFloat() / 32768f)
+                        val p = sample.coerceAtMost(1.0f)
+                        
+                        tempChunk[chunkIdx++] = p
+                        allPoints.add(p)
+                        
+                        if (chunkIdx >= tempChunk.size) {
+                            onUpdate(tempChunk.copyOf())
+                            chunkIdx = 0
                         }
                     }
                     decoder.releaseOutputBuffer(outIdx, false)
-                    if (info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) isOutputEOS = true
-                } else if (outIdx == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
-                    currentSampleRate = decoder.outputFormat.getInteger(MediaFormat.KEY_SAMPLE_RATE)
-                    currentChannels = decoder.outputFormat.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
-                    samplesPerPoint = (currentSampleRate * currentChannels) / POINTS_PER_SECOND
-                } else if (outIdx == MediaCodec.INFO_TRY_AGAIN_LATER && isInputEOS) {
-                    isOutputEOS = true
                 }
             }
             
             if (chunkIdx > 0) onUpdate(tempChunk.copyOfRange(0, chunkIdx))
-            
-            // Sauvegarde Cache Peak
+
+            // Sauvegarde immédiate du cache pour la prochaine fois
             val cacheBuf = ByteBuffer.allocate(allPoints.size * 4).order(ByteOrder.LITTLE_ENDIAN)
             allPoints.forEach { cacheBuf.putFloat(it) }
             cacheFile.writeBytes(cacheBuf.array())
