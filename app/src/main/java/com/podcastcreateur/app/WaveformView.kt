@@ -210,4 +210,8 @@ class WaveformView @JvmOverloads constructor(
         super.performClick()
         return true
     }
+
+    fun getPointsCount(): Int {
+    return points.size
+    }
 }

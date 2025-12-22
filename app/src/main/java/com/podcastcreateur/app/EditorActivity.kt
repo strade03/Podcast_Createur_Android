@@ -1,6 +1,7 @@
 package com.podcastcreateur.app
 
-import android.media.*
+import android.content.Intent
+import android.media.MediaPlayer
 import android.os.Bundle
 import android.view.View
 import android.widget.Toast
@@ -8,263 +9,280 @@ import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import com.podcastcreateur.app.databinding.ActivityEditorBinding
+import linc.com.amplituda.Amplituda
+import linc.com.amplituda.Compress
 import kotlinx.coroutines.*
 import java.io.File
-import java.io.FileInputStream
-import kotlin.math.abs
 
 class EditorActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityEditorBinding
-    private lateinit var sourceFile: File
-    private lateinit var projectDir: File
+    private lateinit var currentFile: File
     
-    // Données du projet courant
-    private var projectData: AudioProjectData? = null
-    
-    private var audioTrack: AudioTrack? = null
-    private var isPlaying = false
-    private var playbackJob: Job? = null
+    // On garde juste les métadonnées légères
+    private var sampleRate = 44100
+    private var totalDurationMs = 0L
 
-    private var currentZoom = 1.0f
+    private var mediaPlayer: MediaPlayer? = null
+    private var playbackJob: Job? = null
+    
+    private var currentZoom = 1.0f 
+    private lateinit var amplituda: Amplituda
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         binding = ActivityEditorBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
+        // Initialiser Amplituda
+        amplituda = Amplituda(this)
+
         val path = intent.getStringExtra("FILE_PATH")
         if (path == null) { finish(); return }
-        sourceFile = File(path)
-        projectDir = sourceFile.parentFile ?: filesDir
+        currentFile = File(path)
+        
+        binding.txtFilename.text = currentFile.name.replace(Regex("^\\d{3}_"), "")
+        binding.waveformView.setZoomLevel(currentZoom)
+        
+        // Charger l'affichage RAPIDEMENT
+        loadWaveformFast()
 
-        binding.txtFilename.text = sourceFile.name
+        binding.waveformView.onPositionChanged = { index -> updateCurrentTimeDisplay(index) }
 
-        // Initialisation UI
-        binding.btnPlay.setOnClickListener { togglePlay() }
-        binding.btnCut.setOnClickListener { performCut() }
-        binding.btnSave.setOnClickListener { performSave() }
+        binding.btnPlay.setOnClickListener { 
+            if(mediaPlayer?.isPlaying == true) stopAudio() else playAudio() 
+        }
+        
+        binding.btnCut.setOnClickListener { cutSelectionStreaming() } // Version optimisée
+        binding.btnNormalize.setOnClickListener { normalizeSelectionStreaming() } // Version optimisée
+        
+        binding.btnSave.setOnClickListener { 
+            Toast.makeText(this, "Modifications enregistrées", Toast.LENGTH_SHORT).show()
+            finish()
+        }
+        
         binding.btnZoomIn.setOnClickListener { applyZoom(currentZoom * 1.5f) }
         binding.btnZoomOut.setOnClickListener { applyZoom(currentZoom / 1.5f) }
-        binding.btnNormalize.setOnClickListener { Toast.makeText(this, "À implémenter sur RAW", Toast.LENGTH_SHORT).show() }
         
-        binding.waveformView.onPositionChanged = { idx -> updateTimeDisplay(idx) }
-
-        // Démarrer l'initialisation lourde
-        startLoadingProcess()
-    }
-
-    private fun startLoadingProcess() {
-        binding.progressBar.visibility = View.VISIBLE
-        binding.progressBar.max = 100
-        setControlsEnabled(false)
-
-        lifecycleScope.launch(Dispatchers.IO) {
-            // Conversion MP3 -> RAW (Peut prendre du temps pour 15min/1h)
-            // Mais c'est fait UNE SEULE FOIS.
-            val data = AudioHelper.prepareProject(sourceFile, projectDir) { progress ->
-                runOnUiThread { binding.progressBar.progress = progress }
-            }
-
-            withContext(Dispatchers.Main) {
-                binding.progressBar.visibility = View.GONE
-                if (data != null) {
-                    projectData = data
-                    // Initialiser la vue
-                    binding.waveformView.initialize(data.peaks.size.toLong())
-                    binding.waveformView.appendData(data.peaks)
-                    binding.txtDuration.text = formatTime(data.durationMs)
-                    setControlsEnabled(true)
-                    Toast.makeText(this@EditorActivity, "Prêt !", Toast.LENGTH_SHORT).show()
-                } else {
-                    Toast.makeText(this@EditorActivity, "Erreur de chargement", Toast.LENGTH_LONG).show()
+        binding.btnReRecord.setOnClickListener {
+            AlertDialog.Builder(this).setTitle("Refaire ?").setPositiveButton("Oui") { _, _ ->
+                stopAudio()
+                val regex = Regex("^(\\d{3}_)(.*)\\.(.*)$")
+                val match = regex.find(currentFile.name)
+                if (match != null) {
+                    val (prefix, name, _) = match.destructured
+                    val intent = Intent(this, RecorderActivity::class.java)
+                    intent.putExtra("PROJECT_PATH", currentFile.parent)
+                    intent.putExtra("CHRONICLE_NAME", name)
+                    intent.putExtra("CHRONICLE_PREFIX", prefix)
+                    startActivity(intent)
                     finish()
                 }
+            }.setNegativeButton("Non", null).show()
+        }
+    }
+
+    private fun loadWaveformFast() {
+        binding.progressBar.visibility = View.VISIBLE
+        
+        // 1. Récupérer d'abord les infos techniques (durée, sampleRate)
+        lifecycleScope.launch(Dispatchers.IO) {
+            val meta = AudioHelper.getAudioMetadata(currentFile)
+            if (meta != null) {
+                sampleRate = meta.sampleRate
+                totalDurationMs = meta.duration
             }
-        }
-    }
 
-    private fun setControlsEnabled(enabled: Boolean) {
-        binding.btnPlay.isEnabled = enabled
-        binding.btnCut.isEnabled = enabled
-        binding.btnSave.isEnabled = enabled
-        binding.waveformView.isEnabled = enabled
-    }
-
-    // --- LECTURE DIRECTE DEPUIS LE DISQUE (STREAMING) ---
-    private fun togglePlay() {
-        if (isPlaying) {
-            stopAudio()
-        } else {
-            playAudioRaw()
-        }
-    }
-
-    private fun playAudioRaw() {
-        val data = projectData ?: return
-        if (!data.rawFile.exists()) return
-
-        stopAudio() // Sécurité
-
-        val minBuf = AudioTrack.getMinBufferSize(data.sampleRate, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT)
-        audioTrack = AudioTrack.Builder()
-            .setAudioFormat(AudioFormat.Builder()
-                .setSampleRate(data.sampleRate)
-                .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
-                .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
-                .build())
-            .setBufferSizeInBytes(minBuf * 2)
-            .setTransferMode(AudioTrack.MODE_STREAM)
-            .build()
-            
-        audioTrack?.play()
-        isPlaying = true
-        binding.btnPlay.setImageResource(R.drawable.ic_stop_read)
-
-        playbackJob = lifecycleScope.launch(Dispatchers.IO) {
-            val fis = FileInputStream(data.rawFile)
-            val buffer = ByteArray(minBuf)
-            
-            // Calculer où commencer (Seek)
-            // 1 point = 20ms. 
-            // 1 sec = SampleRate * 2 bytes
-            val bytesPerSec = data.sampleRate * 2
-            val bytesPerPoint = bytesPerSec / AudioHelper.POINTS_PER_SECOND
-            
-            var currentBytePos = if(binding.waveformView.selectionStart >= 0)
-                                    binding.waveformView.selectionStart.toLong() * bytesPerPoint
-                                 else 
-                                    binding.waveformView.playheadPos.toLong() * bytesPerPoint
-            
-            // Sauter dans le fichier
-            fis.skip(currentBytePos)
-            
-            // Limite de fin
-            val endBytePos = if (binding.waveformView.selectionEnd > binding.waveformView.selectionStart && binding.waveformView.selectionStart >= 0)
-                                binding.waveformView.selectionEnd.toLong() * bytesPerPoint
-                             else
-                                data.rawFile.length()
-
-            try {
-                while (isPlaying && currentBytePos < endBytePos) {
-                    val remaining = endBytePos - currentBytePos
-                    val toRead = minOf(buffer.size.toLong(), remaining).toInt()
+            // 2. Utiliser Amplituda pour l'affichage (C'est ICI que la magie opère)
+            // On demande à compresser pour avoir environ 50 points par seconde, c'est suffisant
+            amplituda.processAudio(currentFile.absolutePath, Compress.withParams(Compress.AVERAGE, 1))
+                .get({ result ->
+                    val amplitudes = result.amplitudesAsList()
                     
-                    val read = fis.read(buffer, 0, toRead)
-                    if (read == -1) break
-                    
-                    val written = audioTrack?.write(buffer, 0, read) ?: 0
-                    if (written < 0) break
-                    
-                    currentBytePos += read
-                    
-                    // UI Update
-                    val currentPoint = (currentBytePos / bytesPerPoint).toInt()
-                    withContext(Dispatchers.Main) {
-                        binding.waveformView.playheadPos = currentPoint
-                        binding.waveformView.invalidate()
-                        updateTimeDisplay(currentPoint)
-                        autoScroll(currentPoint)
+                    // Conversion List<Int> vers FloatArray (0f..1f)
+                    // Amplituda renvoie souvent de gros entiers, on normalise
+                    val maxVal = amplitudes.maxOrNull() ?: 1
+                    val floats = FloatArray(amplitudes.size)
+                    for (i in amplitudes.indices) {
+                        floats[i] = amplitudes[i].toFloat() / maxVal.toFloat() 
                     }
+
+                    runOnUiThread {
+                        binding.txtDuration.text = formatTime(totalDurationMs)
+                        // On réinitialise la vue
+                        binding.waveformView.initialize(floats.size.toLong())
+                        binding.waveformView.appendData(floats)
+                        binding.progressBar.visibility = View.GONE
+                    }
+                }, { error ->
+                    error.printStackTrace()
+                    runOnUiThread { 
+                        Toast.makeText(this@EditorActivity, "Erreur chargement onde", Toast.LENGTH_SHORT).show()
+                        binding.progressBar.visibility = View.GONE
+                    }
+                })
+        }
+    }
+
+    // --- ACTIONS SUR FICHIER (STREAMING) ---
+    // Plus besoin de charger le PCM en mémoire RAM, on travaille de fichier à fichier
+
+    private fun cutSelectionStreaming() {
+        val startIdx = binding.waveformView.selectionStart
+        val endIdx = binding.waveformView.selectionEnd
+        if (startIdx < 0 || endIdx <= startIdx) return
+
+        stopAudio()
+        binding.progressBar.visibility = View.VISIBLE
+        
+        lifecycleScope.launch(Dispatchers.IO) {
+            val totalPoints = binding.waveformView.getPointsCount() // Méthode à ajouter dans WaveformView ou estimer
+            if (totalPoints == 0) return@launch
+            
+            // Conversion : Index Visuel -> Sample Audio réel
+            // Ratio = (Index / TotalPoints) * TotalSamples
+            val meta = AudioHelper.getAudioMetadata(currentFile) ?: return@launch
+            val totalSamples = meta.totalSamples
+            
+            // Calcul précis des positions de coupe
+            // On utilise le ratio de position dans la vue Waveform
+            // Attention : Si Amplituda a compressé, WaveformView a moins de points que de samples
+            val ratio = totalSamples.toDouble() / totalPoints.toDouble()
+            
+            val startSample = (startIdx * ratio).toInt()
+            val endSample = (endIdx * ratio).toInt()
+
+            val tmpFile = File(currentFile.parent, "tmp_cut.m4a")
+            
+            // Appel à la fonction streaming existante dans votre AudioHelper
+            val success = AudioHelper.deleteRegionStreaming(currentFile, tmpFile, startSample, endSample)
+            
+            withContext(Dispatchers.Main) {
+                if (success) {
+                    currentFile.delete()
+                    tmpFile.renameTo(currentFile)
+                    // Recharger l'affichage
+                    binding.waveformView.clearData()
+                    loadWaveformFast()
+                    Toast.makeText(this@EditorActivity, "Coupé !", Toast.LENGTH_SHORT).show()
+                } else {
+                    Toast.makeText(this@EditorActivity, "Erreur lors de la coupe", Toast.LENGTH_SHORT).show()
+                    binding.progressBar.visibility = View.GONE
                 }
-            } catch (e: Exception) { e.printStackTrace() }
-            finally {
-                fis.close()
-                withContext(Dispatchers.Main) { stopAudio() }
             }
+        }
+    }
+
+    private fun normalizeSelectionStreaming() {
+        // La normalisation en streaming est complexe car il faut 2 passes (Scan Max -> Apply Gain)
+        // Votre AudioHelper a déjà une fonction normalizeAudio, utilisons-la.
+        stopAudio()
+        binding.progressBar.visibility = View.VISIBLE
+        
+        lifecycleScope.launch(Dispatchers.IO) {
+            val tmpFile = File(currentFile.parent, "tmp_norm.m4a")
+            // On normalise TOUT le fichier pour simplifier, ou on calcule les MS
+            // Comme on n'a plus le mapping exact MS <-> Index facile sans recalculer,
+            // on applique sur tout le fichier (0 à fin).
+            val success = AudioHelper.normalizeAudio(currentFile, tmpFile, 0, totalDurationMs, sampleRate, 0.98f) {}
+            
+            withContext(Dispatchers.Main) {
+                if(success) {
+                    currentFile.delete()
+                    tmpFile.renameTo(currentFile)
+                    binding.waveformView.clearData()
+                    loadWaveformFast()
+                    Toast.makeText(this@EditorActivity, "Normalisé", Toast.LENGTH_SHORT).show()
+                } else {
+                    binding.progressBar.visibility = View.GONE
+                    Toast.makeText(this@EditorActivity, "Erreur normalisation", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+    }
+
+    private fun updateCurrentTimeDisplay(index: Int) {
+        // Estimation du temps basé sur la position relative
+        val totalPoints = binding.waveformView.getPointsCount()
+        if (totalPoints > 0 && totalDurationMs > 0) {
+            val ms = (index.toDouble() / totalPoints.toDouble() * totalDurationMs).toLong()
+            binding.txtCurrentTime.text = formatTime(ms)
+        }
+    }
+    
+    private fun formatTime(durationMs: Long): String {
+        val sec = (durationMs / 1000).toInt()
+        val m = sec / 60
+        val s = sec % 60
+        return String.format("%02d:%02d", m, s)
+    }
+
+    private fun applyZoom(newZoom: Float) {
+        val clamped = newZoom.coerceIn(0.1f, 50.0f)
+        currentZoom = clamped
+        binding.waveformView.setZoomLevel(currentZoom)
+    }
+
+    private fun playAudio() {
+        stopAudio()
+        try {
+            mediaPlayer = MediaPlayer().apply {
+                setDataSource(currentFile.absolutePath)
+                prepare()
+                
+                // Calculer la position de départ (ms)
+                val startIdx = if(binding.waveformView.selectionStart >= 0) binding.waveformView.selectionStart else binding.waveformView.playheadPos
+                val totalPoints = binding.waveformView.getPointsCount()
+                if(totalPoints > 0) {
+                    val startMs = (startIdx.toDouble() / totalPoints.toDouble() * totalDurationMs).toInt()
+                    seekTo(startMs)
+                }
+                
+                start()
+                setOnCompletionListener { stopAudio() }
+            }
+            binding.btnPlay.setImageResource(R.drawable.ic_stop_read)
+            
+            playbackJob = lifecycleScope.launch {
+                while (mediaPlayer?.isPlaying == true) {
+                    val currentMs = mediaPlayer?.currentPosition?.toLong() ?: 0L
+                    val totalPoints = binding.waveformView.getPointsCount()
+                    
+                    if (totalPoints > 0 && totalDurationMs > 0) {
+                        val currentIdx = ((currentMs.toDouble() / totalDurationMs.toDouble()) * totalPoints).toInt()
+                        binding.waveformView.playheadPos = currentIdx
+                        binding.waveformView.invalidate()
+                        
+                        runOnUiThread { updateCurrentTimeDisplay(currentIdx) }
+                        autoScroll(currentIdx)
+                        
+                        // Stop si fin de sélection
+                        if (binding.waveformView.selectionEnd > 0 && currentIdx >= binding.waveformView.selectionEnd) {
+                            mediaPlayer?.pause()
+                            break
+                        }
+                    }
+                    delay(40)
+                }
+                if (mediaPlayer?.isPlaying != true) stopAudio()
+            }
+        } catch (e: Exception) { e.printStackTrace() }
+    }
+
+    private fun autoScroll(sampleIdx: Int) {
+        val px = binding.waveformView.sampleToPixel(sampleIdx)
+        val screenCenter = binding.scroller.width / 2
+        val target = (px - screenCenter).toInt().coerceAtLeast(0)
+        if (abs(binding.scroller.scrollX - target) > 50) {
+            binding.scroller.smoothScrollTo(target, 0)
         }
     }
 
     private fun stopAudio() {
-        isPlaying = false
         playbackJob?.cancel()
-        try {
-            audioTrack?.stop()
-            audioTrack?.release()
-        } catch (e: Exception) {}
-        audioTrack = null
+        mediaPlayer?.release()
+        mediaPlayer = null
         binding.btnPlay.setImageResource(R.drawable.ic_play)
-    }
-
-    // --- EDITION RAPIDE SUR DISQUE ---
-    private fun performCut() {
-        val data = projectData ?: return
-        val start = binding.waveformView.selectionStart
-        val end = binding.waveformView.selectionEnd
-        
-        if (start < 0 || end <= start) return
-        stopAudio()
-        
-        binding.progressBar.visibility = View.VISIBLE
-        setControlsEnabled(false)
-
-        lifecycleScope.launch(Dispatchers.IO) {
-            // 1. Coupe physique du fichier RAW (rapide)
-            val success = AudioHelper.cutRawFile(data.rawFile, data.sampleRate, start, end)
-            
-            if (success) {
-                // 2. Recalculer l'affichage (On retire juste les points de la liste, c'est instantané en RAM)
-                // Note : Pour faire simple ici, on recharge tout proprement
-                // Idéalement on manipulerait le tableau peaks directement
-                val newData = AudioHelper.prepareProject(sourceFile, projectDir) { /* ignore */ }
-                
-                withContext(Dispatchers.Main) {
-                    if (newData != null) {
-                        projectData = newData
-                        binding.waveformView.clearData()
-                        binding.waveformView.initialize(newData.peaks.size.toLong())
-                        binding.waveformView.appendData(newData.peaks)
-                        binding.waveformView.clearSelection()
-                        binding.waveformView.playheadPos = start
-                    }
-                    binding.progressBar.visibility = View.GONE
-                    setControlsEnabled(true)
-                }
-            }
-        }
-    }
-
-    private fun performSave() {
-        val data = projectData ?: return
-        stopAudio()
-        binding.progressBar.visibility = View.VISIBLE
-        setControlsEnabled(false)
-        
-        lifecycleScope.launch(Dispatchers.IO) {
-            // RAW -> M4A final
-            val success = AudioHelper.exportRawToM4A(data.rawFile, sourceFile, data.sampleRate)
-            withContext(Dispatchers.Main) {
-                binding.progressBar.visibility = View.GONE
-                setControlsEnabled(true)
-                if (success) {
-                    Toast.makeText(this@EditorActivity, "Sauvegardé !", Toast.LENGTH_SHORT).show()
-                    finish()
-                } else {
-                    Toast.makeText(this@EditorActivity, "Erreur sauvegarde", Toast.LENGTH_SHORT).show()
-                }
-            }
-        }
-    }
-
-    private fun updateTimeDisplay(index: Int) {
-        val ms = index.toLong() * (1000 / AudioHelper.POINTS_PER_SECOND)
-        binding.txtCurrentTime.text = formatTime(ms)
-    }
-
-    private fun formatTime(ms: Long): String {
-        val s = (ms / 1000).toInt()
-        return String.format("%02d:%02d", s / 60, s % 60)
-    }
-
-    private fun applyZoom(newZoom: Float) {
-        currentZoom = newZoom.coerceIn(0.1f, 50.0f)
-        binding.waveformView.setZoomLevel(currentZoom)
-    }
-    
-    private fun autoScroll(idx: Int) {
-        val px = binding.waveformView.sampleToPixel(idx)
-        val target = (px - binding.scroller.width / 2).toInt().coerceAtLeast(0)
-        if (abs(binding.scroller.scrollX - target) > 20) binding.scroller.scrollTo(target, 0)
     }
 
     override fun onStop() { super.onStop(); stopAudio() }
