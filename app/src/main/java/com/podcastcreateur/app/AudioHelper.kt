@@ -7,35 +7,35 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import kotlin.math.abs
 
+// Structure de données pour le mode "Disque"
 data class AudioProjectData(
-    val rawFile: File,   // Le fichier audio décompressé (PCM 16bit Mono)
-    val peaks: FloatArray, // Les données pour dessiner l'onde
+    val rawFile: File,     // Le fichier audio brut (PCM 16bit Mono)
+    val peaks: FloatArray, // Les données visuelles (Cache RAM léger)
     val sampleRate: Int,
     val durationMs: Long
 )
 
 object AudioHelper {
-    const val POINTS_PER_SECOND = 50 // Précision de l'affichage
+    const val POINTS_PER_SECOND = 50 // Résolution de l'onde (1 point = 20ms)
 
     /**
-     * C'est la fonction CLÉ. Elle transforme n'importe quel MP3/M4A en :
-     * 1. Un fichier RAW sur le disque (pour la lecture rapide et l'édition)
-     * 2. Un tableau de Peaks (pour l'affichage instantané)
+     * INITIALISATION DU PROJET (MP3 -> RAW + PEAKS)
+     * Cette fonction prépare le terrain pour une édition fluide.
      */
     fun prepareProject(inputFile: File, projectDir: File, onProgress: (Int) -> Unit): AudioProjectData? {
         val rawFile = File(projectDir, "working_audio.raw")
         val cachePeaks = File(projectDir, "waveform.peaks")
         
-        // Si les fichiers existent déjà, on charge le cache (Ouverture instantanée)
+        // Si le cache existe déjà, ouverture INSTANTANÉE
         if (rawFile.exists() && rawFile.length() > 0 && cachePeaks.exists()) {
             return try {
                 val bytes = cachePeaks.readBytes()
                 val floats = FloatArray(bytes.size / 4)
                 ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN).asFloatBuffer().get(floats)
-                // On récupère le sampleRate "standard"
+                // On estime le sampleRate (standard 44100) et la durée via la taille du fichier
                 AudioProjectData(rawFile, floats, 44100, (rawFile.length() / 2 / 44.1).toLong())
             } catch (e: Exception) {
-                // Si erreur cache, on recrée
+                // Si cache corrompu, on refait
                 convertFileToRaw(inputFile, rawFile, onProgress)
             }
         }
@@ -43,6 +43,9 @@ object AudioHelper {
         return convertFileToRaw(inputFile, rawFile, onProgress)
     }
 
+    /**
+     * CONVERSION DISQUE À DISQUE (Pas de saturation RAM)
+     */
     private fun convertFileToRaw(inputFile: File, outputFile: File, onProgress: (Int) -> Unit): AudioProjectData? {
         val extractor = MediaExtractor()
         var codec: MediaCodec? = null
@@ -77,16 +80,12 @@ object AudioHelper {
             var isOutputEOS = false
             
             var outputSampleRate = format.getInteger(MediaFormat.KEY_SAMPLE_RATE)
-            var channelCount = if (format.containsKey(MediaFormat.KEY_CHANNEL_COUNT)) format.getInteger(MediaFormat.KEY_CHANNEL_COUNT) else 2
+            var channelCount = if (format.containsKey(MediaFormat.KEY_CHANNEL_COUNT)) format.getInteger(MediaFormat.KEY_CHANNEL_COUNT) else 1
             
-            // Pour le calcul des pics
             var samplesPerPoint = outputSampleRate / POINTS_PER_SECOND
             var peakAccumulator = 0f
             var sampleCounter = 0
             
-            // Progression
-            var processedUs = 0L
-
             while (!isOutputEOS) {
                 if (!isInputEOS) {
                     val inIdx = codec.dequeueInputBuffer(5000)
@@ -114,19 +113,19 @@ object AudioHelper {
                         outBuf.order(ByteOrder.LITTLE_ENDIAN)
                         val shorts = outBuf.asShortBuffer()
                         
-                        // Buffer pour écrire sur le disque
+                        // Buffer pour écriture disque (Mono)
                         val chunkBytes = ByteArray(shorts.remaining() * 2 / channelCount) 
                         val chunkBuffer = ByteBuffer.wrap(chunkBytes).order(ByteOrder.LITTLE_ENDIAN)
 
                         while (shorts.hasRemaining()) {
-                            // Mixage Down to Mono
+                            // Mixage Down to Mono (Indispensable pour fichiers longs)
                             var sum = 0
                             for (c in 0 until channelCount) {
                                 if (shorts.hasRemaining()) sum += shorts.get()
                             }
                             val monoSample = (sum / channelCount).toShort()
                             
-                            // 1. Écriture Disque
+                            // 1. Écriture
                             chunkBuffer.putShort(monoSample)
                             
                             // 2. Calcul Pics
@@ -142,23 +141,20 @@ object AudioHelper {
                         }
                         outputStream.write(chunkBytes)
                         
-                        // Progression UI
-                        processedUs += info.presentationTimeUs
-                        val progress = ((info.presentationTimeUs.toDouble() / durationUs.toDouble()) * 100).toInt()
-                        onProgress(progress)
+                        // Progression
+                        if (durationUs > 0) {
+                            val progress = ((info.presentationTimeUs.toDouble() / durationUs.toDouble()) * 100).toInt()
+                            onProgress(progress.coerceIn(0, 100))
+                        }
                     }
                     codec.releaseOutputBuffer(outIdx, false)
                     if (info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) isOutputEOS = true
                 }
             }
 
-            outputStream.flush()
-            outputStream.close()
-            codec.stop()
-            codec.release()
-            extractor.release()
+            outputStream.flush(); outputStream.close()
+            codec.stop(); codec.release(); extractor.release()
 
-            // Sauvegarde des pics pour la prochaine fois
             val finalPeaks = peaksList.toFloatArray()
             savePeaksCache(inputFile, finalPeaks)
 
@@ -166,7 +162,7 @@ object AudioHelper {
 
         } catch (e: Exception) {
             e.printStackTrace()
-            outputStream?.close()
+            try { outputStream?.close() } catch(ex:Exception){}
             return null
         }
     }
@@ -187,9 +183,9 @@ object AudioHelper {
         
         try {
             fis = FileInputStream(rawFile)
-            val buffer = ByteArray(4096) // Buffer de lecture
+            val buffer = ByteArray(4096)
             
-            val format = MediaFormat.createAudioFormat(MediaFormat.MIMETYPE_AUDIO_AAC, sampleRate, 1) // Mono export
+            val format = MediaFormat.createAudioFormat(MediaFormat.MIMETYPE_AUDIO_AAC, sampleRate, 1)
             format.setInteger(MediaFormat.KEY_BIT_RATE, 128000)
             format.setInteger(MediaFormat.KEY_AAC_PROFILE, MediaCodecInfo.CodecProfileLevel.AACObjectLC)
             format.setInteger(MediaFormat.KEY_MAX_INPUT_SIZE, 16384)
@@ -202,7 +198,6 @@ object AudioHelper {
             var trackIndex = -1
             var muxerStarted = false
             val info = MediaCodec.BufferInfo()
-            
             var isEOS = false
             
             while (true) {
@@ -248,24 +243,20 @@ object AudioHelper {
         }
     }
 
-    // --- COUPE RAPIDE (Disque à Disque) ---
+    // --- COUPE RAPIDE (DISQUE) ---
     fun cutRawFile(rawFile: File, sampleRate: Int, startPoint: Int, endPoint: Int): Boolean {
-        // startPoint / endPoint sont des index de l'onde (1 point = 20ms)
-        // 1 sample (Short) = 2 bytes
         val bytesPerSec = sampleRate * 2
         val bytesPerPoint = bytesPerSec / POINTS_PER_SECOND
-        
         val startByte = startPoint.toLong() * bytesPerPoint
         val endByte = endPoint.toLong() * bytesPerPoint
         
         val tempFile = File(rawFile.parent, "temp_cut.raw")
-        
         try {
             val raf = RandomAccessFile(rawFile, "r")
             val fos = FileOutputStream(tempFile)
             val buffer = ByteArray(8192)
             
-            // 1. Copier avant la coupe
+            // 1. Copier début
             raf.seek(0)
             var remaining = startByte
             while (remaining > 0) {
@@ -275,23 +266,98 @@ object AudioHelper {
                 fos.write(buffer, 0, read)
                 remaining -= read
             }
-            
-            // 2. Sauter la coupe
+            // 2. Sauter sélection
             raf.seek(endByte)
-            
-            // 3. Copier le reste
+            // 3. Copier fin
             var read: Int
             while (raf.read(buffer).also { read = it } != -1) {
                 fos.write(buffer, 0, read)
             }
-            
-            raf.close()
-            fos.close()
-            
-            // Remplacer
-            rawFile.delete()
-            tempFile.renameTo(rawFile)
+            raf.close(); fos.close()
+            rawFile.delete(); tempFile.renameTo(rawFile)
             return true
         } catch(e: Exception) { return false }
+    }
+
+    // --- FUSION DE FICHIERS (FIX POUR PROJECT ACTIVITY) ---
+    fun mergeFiles(inputs: List<File>, output: File): Boolean {
+        if (inputs.isEmpty()) return false
+        val tempRaw = File(output.parent, "temp_merge_global.raw")
+        
+        try {
+            val fos = FileOutputStream(tempRaw)
+            val bos = BufferedOutputStream(fos)
+            var sampleRate = 44100 // Par défaut
+
+            // 1. On décode tout vers un gros fichier RAW temporaire
+            for (file in inputs) {
+                if (!file.exists()) continue
+                // On utilise une version simplifiée de convertToRaw qui append au stream
+                val extractor = MediaExtractor()
+                extractor.setDataSource(file.absolutePath)
+                var format: MediaFormat? = null
+                var trackIdx = -1
+                for (i in 0 until extractor.trackCount) {
+                    val f = extractor.getTrackFormat(i)
+                    if (f.getString(MediaFormat.KEY_MIME)?.startsWith("audio/") == true) {
+                        format = f; trackIdx = i; break
+                    }
+                }
+                if (format == null) continue
+                extractor.selectTrack(trackIdx)
+                val codec = MediaCodec.createDecoderByType(format.getString(MediaFormat.KEY_MIME)!!)
+                codec.configure(format, null, null, 0)
+                codec.start()
+                
+                sampleRate = format.getInteger(MediaFormat.KEY_SAMPLE_RATE)
+                val channels = if (format.containsKey(MediaFormat.KEY_CHANNEL_COUNT)) format.getInteger(MediaFormat.KEY_CHANNEL_COUNT) else 1
+                
+                val info = MediaCodec.BufferInfo()
+                var eos = false
+                while (!eos) {
+                    val inIdx = codec.dequeueInputBuffer(5000)
+                    if (inIdx >= 0) {
+                        val buf = codec.getInputBuffer(inIdx)
+                        val sz = extractor.readSampleData(buf!!, 0)
+                        if (sz < 0) {
+                            codec.queueInputBuffer(inIdx, 0, 0, 0, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
+                            eos = true
+                        } else {
+                            codec.queueInputBuffer(inIdx, 0, sz, extractor.sampleTime, 0)
+                            extractor.advance()
+                        }
+                    }
+                    val outIdx = codec.dequeueOutputBuffer(info, 5000)
+                    if (outIdx >= 0) {
+                        val outBuf = codec.getOutputBuffer(outIdx)
+                        if (outBuf != null && info.size > 0) {
+                            outBuf.order(ByteOrder.LITTLE_ENDIAN)
+                            val shorts = outBuf.asShortBuffer()
+                            val chunk = ByteArray(shorts.remaining() * 2 / channels)
+                            val chunkBuff = ByteBuffer.wrap(chunk).order(ByteOrder.LITTLE_ENDIAN)
+                            while(shorts.hasRemaining()) {
+                                var sum = 0
+                                for(c in 0 until channels) if(shorts.hasRemaining()) sum += shorts.get()
+                                chunkBuff.putShort((sum/channels).toShort())
+                            }
+                            bos.write(chunk)
+                        }
+                        codec.releaseOutputBuffer(outIdx, false)
+                        if (info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) eos = true
+                    }
+                }
+                codec.stop(); codec.release(); extractor.release()
+            }
+            bos.flush(); bos.close()
+
+            // 2. On encode le RAW global vers le M4A final
+            val success = exportRawToM4A(tempRaw, output, sampleRate)
+            tempRaw.delete()
+            return success
+
+        } catch (e: Exception) {
+            e.printStackTrace()
+            return false
+        }
     }
 }
