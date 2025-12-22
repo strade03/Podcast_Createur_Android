@@ -282,6 +282,44 @@ class EditorActivity : AppCompatActivity() {
         Toast.makeText(this, "Coupé !", Toast.LENGTH_SHORT).show()
     }
 
+    private fun refreshWaveformFromPcm() {
+        val pcm = currentPcmData ?: return
+        
+        // 1. Calculer le nombre d'échantillons par point (pour garder 50 points par seconde)
+        val samplesPerPoint = originalSampleRate / AudioHelper.POINTS_PER_SECOND
+        
+        // 2. Éviter la division par zéro si le fichier est trop court
+        if (samplesPerPoint == 0) return 
+
+        val newPointsSize = pcm.size / samplesPerPoint
+        val newPoints = FloatArray(newPointsSize)
+
+        // 3. Calculer les pics (comme lors du chargement initial)
+        for (i in 0 until newPointsSize) {
+            var max = 0f
+            for (j in 0 until samplesPerPoint) {
+                val idx = i * samplesPerPoint + j
+                if (idx < pcm.size) {
+                    val v = Math.abs(pcm[idx].toFloat() / 32768f)
+                    if (v > max) max = v
+                }
+            }
+            newPoints[i] = max
+        }
+
+        // 4. Mettre à jour la vue et les textes
+        binding.waveformView.clearData()
+        binding.waveformView.initialize(newPointsSize.toLong())
+        binding.waveformView.appendData(newPoints)
+        
+        // Mettre à jour le texte de la durée totale en haut
+        val totalMs = (pcm.size.toLong() * 1000) / originalSampleRate
+        binding.txtDuration.text = formatTime(totalMs)
+        
+        // Replacer le temps courant à 0 ou au début de la sélection
+        updateCurrentTimeDisplay(binding.waveformView.playheadPos)
+    }
+
     private fun normalizeSelection() {
         val meta = metadata ?: return
         stopAudio()
