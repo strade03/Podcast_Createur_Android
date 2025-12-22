@@ -52,5 +52,6 @@ dependencies {
     implementation 'androidx.lifecycle:lifecycle-runtime-ktx:2.7.0'
     // implementation 'com.github.lincollincol:Amplituda:2.2.2'
     //implementation files('libs/Amplituda-2.2.2.aar')
-    implementation files('libs/Amplituda-2.3.0.aar')
+    // implementation files('libs/Amplituda-2.3.0.aar')
+    implementation 'com.github.lincollincol:Amplituda:2.3.0'
 }
