@@ -292,6 +292,21 @@ object AudioHelper {
         }
     }
 
+    fun cutShortArray(input: ShortArray, startSample: Int, endSample: Int): ShortArray {
+        val newSize = input.size - (endSample - startSample)
+        if (newSize <= 0) return ShortArray(0)
+        val result = ShortArray(newSize)
+        
+        // Copie la partie avant la coupe
+        System.arraycopy(input, 0, result, 0, startSample)
+        // Copie la partie après la coupe
+        val remaining = input.size - endSample
+        if (remaining > 0) {
+            System.arraycopy(input, endSample, result, startSample, remaining)
+        }
+        return result
+    }
+    
     private fun feedEncoder(encoder: MediaCodec, data: ByteArray) {
         var offset = 0
         while (offset < data.size) {

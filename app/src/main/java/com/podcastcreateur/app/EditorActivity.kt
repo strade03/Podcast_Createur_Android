@@ -24,6 +24,9 @@ class EditorActivity : AppCompatActivity() {
     
     private var currentZoom = 1.0f  // Zom initial 
 
+    private var currentPcmData: ShortArray? = null // Le son "vivant" en mémoire
+    private var originalSampleRate: Int = 44100
+    
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         binding = ActivityEditorBinding.inflate(layoutInflater)
@@ -46,11 +49,27 @@ class EditorActivity : AppCompatActivity() {
         
         binding.btnCut.setOnClickListener { cutSelection() }
         binding.btnNormalize.setOnClickListener { normalizeSelection() }
-        binding.btnSave.setOnClickListener { 
-            Toast.makeText(this, "Sauvegardé", Toast.LENGTH_SHORT).show()
-            finish()
+        binding.btnSave.setOnClickListener {
+            val pcm = currentPcmData ?: return@setOnClickListener
+            binding.progressBar.visibility = View.VISIBLE
+            
+            lifecycleScope.launch(Dispatchers.IO) {
+                val tmpFile = File(currentFile.parent, "save_tmp.m4a")
+                val success = AudioHelper.savePCMToAAC(pcm, tmpFile, originalSampleRate)
+                
+                withContext(Dispatchers.Main) {
+                    binding.progressBar.visibility = View.GONE
+                    if (success) {
+                        currentFile.delete()
+                        tmpFile.renameTo(currentFile)
+                        Toast.makeText(this@EditorActivity, "Sauvegardé avec succès", Toast.LENGTH_SHORT).show()
+                        finish()
+                    } else {
+                        Toast.makeText(this@EditorActivity, "Erreur de sauvegarde", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            }
         }
-        
         binding.btnZoomIn.setOnClickListener { applyZoom(currentZoom * 1.5f) }
         binding.btnZoomOut.setOnClickListener { applyZoom(currentZoom / 1.5f) }
         
@@ -72,32 +91,69 @@ class EditorActivity : AppCompatActivity() {
         }
     }
 
+    // private fun loadWaveformStreaming() {
+    //     binding.progressBar.visibility = View.VISIBLE
+        
+    //     lifecycleScope.launch(Dispatchers.IO) {
+    //         metadata = AudioHelper.getAudioMetadata(currentFile)
+    //         val meta = metadata
+            
+    //         if (meta == null) {
+    //             withContext(Dispatchers.Main) { finish() }
+    //             return@launch
+    //         }
+
+    //         withContext(Dispatchers.Main) {
+    //             binding.txtDuration.text = formatTime(meta.duration)
+    //             // On estime le nombre de points : Durée (sec) * 50
+    //             val estimatedPoints = (meta.duration / 1000) * AudioHelper.POINTS_PER_SECOND
+    //             binding.waveformView.initialize(estimatedPoints)
+    //         }
+
+    //         AudioHelper.loadWaveformStream(currentFile) { newChunk ->
+    //             runOnUiThread {
+    //                 binding.waveformView.appendData(newChunk)
+    //                 if (binding.progressBar.visibility == View.VISIBLE) {
+    //                     binding.progressBar.visibility = View.GONE
+    //                 }
+    //             }
+    //         }
+    //     }
+    // }
+
     private fun loadWaveformStreaming() {
         binding.progressBar.visibility = View.VISIBLE
-        
         lifecycleScope.launch(Dispatchers.IO) {
+            // 1. Décodage complet en PCM
+            val content = AudioHelper.decodeToPCM(currentFile)
+            currentPcmData = content.data
+            originalSampleRate = content.sampleRate
             metadata = AudioHelper.getAudioMetadata(currentFile)
-            val meta = metadata
-            
-            if (meta == null) {
-                withContext(Dispatchers.Main) { finish() }
-                return@launch
-            }
 
             withContext(Dispatchers.Main) {
-                binding.txtDuration.text = formatTime(meta.duration)
-                // On estime le nombre de points : Durée (sec) * 50
-                val estimatedPoints = (meta.duration / 1000) * AudioHelper.POINTS_PER_SECOND
-                binding.waveformView.initialize(estimatedPoints)
-            }
-
-            AudioHelper.loadWaveformStream(currentFile) { newChunk ->
-                runOnUiThread {
-                    binding.waveformView.appendData(newChunk)
-                    if (binding.progressBar.visibility == View.VISIBLE) {
-                        binding.progressBar.visibility = View.GONE
+                // 2. Génération de l'onde à partir du PCM chargé
+                val pcm = currentPcmData ?: return@withContext
+                binding.txtDuration.text = formatTime((pcm.size.toLong() * 1000) / originalSampleRate)
+                
+                // Génération des points de l'onde (50 points par seconde)
+                val samplesPerPoint = originalSampleRate / AudioHelper.POINTS_PER_SECOND
+                val newPoints = FloatArray(pcm.size / samplesPerPoint)
+                for (i in newPoints.indices) {
+                    var max = 0f
+                    for (j in 0 until samplesPerPoint) {
+                        val idx = i * samplesPerPoint + j
+                        if (idx < pcm.size) {
+                            val v = Math.abs(pcm[idx].toFloat() / 32768f)
+                            if (v > max) max = v
+                        }
                     }
+                    newPoints[i] = max
                 }
+                
+                binding.waveformView.clearData()
+                binding.waveformView.initialize(newPoints.size.toLong())
+                binding.waveformView.appendData(newPoints)
+                binding.progressBar.visibility = View.GONE
             }
         }
     }
@@ -203,38 +259,27 @@ class EditorActivity : AppCompatActivity() {
     }
 
     private fun cutSelection() {
-        val meta = metadata ?: return
+        val pcm = currentPcmData ?: return
         val startIdx = binding.waveformView.selectionStart
         val endIdx = binding.waveformView.selectionEnd
         if (startIdx < 0 || endIdx <= startIdx) return
+
+        stopAudio()
         
-        stopAudio() 
-        binding.progressBar.visibility = View.VISIBLE
-        lifecycleScope.launch(Dispatchers.IO) {
-            // Conversion Index Point -> Samples pour la coupe physique
-            // (Index * SampleRate / 50)
-            val samplesPerPoint = meta.sampleRate / AudioHelper.POINTS_PER_SECOND
-            val startSample = startIdx * samplesPerPoint
-            val endSample = endIdx * samplesPerPoint
-            
-            val tmp = File(currentFile.parent, "tmp_cut.m4a")
-            val success = AudioHelper.deleteRegionStreaming(currentFile, tmp, startSample, endSample)
-            
-            if(success) {
-                currentFile.delete()
-                tmp.renameTo(currentFile)
-                withContext(Dispatchers.Main) {
-                    binding.waveformView.clearData()
-                    loadWaveformStreaming()
-                    Toast.makeText(this@EditorActivity, "Coupé !", Toast.LENGTH_SHORT).show()
-                }
-            } else {
-                withContext(Dispatchers.Main) {
-                    binding.progressBar.visibility = View.GONE
-                    Toast.makeText(this@EditorActivity, "Erreur coupe", Toast.LENGTH_SHORT).show()
-                }
-            }
-        }
+        // Conversion Index Waveform -> Samples PCM
+        val samplesPerPoint = originalSampleRate / AudioHelper.POINTS_PER_SECOND
+        val startSample = startIdx * samplesPerPoint
+        val endSample = endIdx * samplesPerPoint
+
+        // COUPE MÉMOIRE (Ultra rapide)
+        currentPcmData = AudioHelper.cutShortArray(pcm, startSample, endSample)
+
+        // Mise à jour de l'interface
+        val newPointsSize = currentPcmData!!.size / samplesPerPoint
+        // Ici on pourrait recalculer l'onde ou simplement retirer les points du WaveformView
+        // Pour faire simple, on recharge l'affichage à partir du nouveau PCM
+        refreshWaveformFromPcm() 
+        Toast.makeText(this, "Coupé !", Toast.LENGTH_SHORT).show()
     }
 
     private fun normalizeSelection() {
