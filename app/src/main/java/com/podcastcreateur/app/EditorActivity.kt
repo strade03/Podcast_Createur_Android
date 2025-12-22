@@ -74,8 +74,8 @@ class EditorActivity : AppCompatActivity() {
                 }
             }.setNegativeButton("Non", null).show()
         }
-        updateEditButtons(false)        
-        loadEditorData()
+        // updateEditButtons(false)        
+        // loadEditorData()
     }
 
     private fun updateEditButtons(enabled: Boolean) {
