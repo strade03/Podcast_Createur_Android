@@ -9,8 +9,8 @@ import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import com.podcastcreateur.app.databinding.ActivityEditorBinding
-import linc.com.amplituda.Amplituda
-import linc.com.amplituda.Compress
+import com.linc.amplituda.Amplituda
+import com.linc.amplituda.Compress
 import kotlinx.coroutines.*
 import java.io.File
 import kotlin.math.abs
