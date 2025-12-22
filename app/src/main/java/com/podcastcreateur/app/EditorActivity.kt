@@ -31,12 +31,11 @@ class EditorActivity : AppCompatActivity() {
     private var currentZoom = 1.0f 
     private lateinit var amplituda: Amplituda
 
-    // Gestion des coupes virtuelles
-    // Stocke des paires (StartMS, EndMS) à ignorer
     private val pendingCuts = ArrayList<Pair<Long, Long>>() 
     
-    // Pour mapper l'affichage (qui rétrécit) au fichier physique (qui reste entier jusqu'à sauvegarde)
-    private var currentPointsPerSecond = 50 // Sera calculé dynamiquement
+    // CORRECTION SYNCHRO : On utilise un Double pour la précision
+    // C'est le nombre de millisecondes que représente 1 pixel/point de l'onde
+    private var msPerPoint: Double = 20.0 
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -59,13 +58,8 @@ class EditorActivity : AppCompatActivity() {
             if(mediaPlayer?.isPlaying == true) stopAudio() else playAudio() 
         }
         
-        // Bouton Coupe : Virtuel maintenant
         binding.btnCut.setOnClickListener { performVirtualCut() }
-        
-        // Bouton Normaliser : Reste direct pour l'instant (ou pourrait être différé aussi, mais plus complexe)
         binding.btnNormalize.setOnClickListener { normalizeSelectionStreaming() }
-        
-        // Bouton Save : Applique tout
         binding.btnSave.setOnClickListener { saveChangesAndExit() }
         
         binding.btnZoomIn.setOnClickListener { applyZoom(currentZoom * 1.5f) }
@@ -99,27 +93,30 @@ class EditorActivity : AppCompatActivity() {
                 totalDurationMs = meta.duration
             }
             
-            // --- OPTIMISATION RÉSOLUTION DYNAMIQUE ---
-            val durationSec = totalDurationMs / 1000
-            
-            // Plus le fichier est court, plus on veut de points par seconde pour la précision
-            val targetPps = when {
-                durationSec < 60 -> 400   // Très court (<1min) : Ultra précis
-                durationSec < 300 -> 200  // Court (<5min) : Précis
-                durationSec < 900 -> 100  // Moyen (15min) : Standard
-                else -> 50                // Très long : Low res pour perf
+            // On garde l'estimation pour la demande de compression, 
+            // mais on ne s'en sert plus pour la synchro.
+            val durationSec = (totalDurationMs / 1000).coerceAtLeast(1)
+            val requestPps = when {
+                durationSec < 60 -> 400
+                durationSec < 300 -> 200
+                durationSec < 900 -> 100
+                else -> 50 
             }
-            currentPointsPerSecond = targetPps
 
             amplituda.processAudio(
                 currentFile.absolutePath, 
-                Compress.withParams(Compress.AVERAGE, targetPps) 
+                Compress.withParams(Compress.AVERAGE, requestPps) 
             ).get({ result ->
                 val amplitudes = result.amplitudesAsList()
                 
+                // --- CORRECTION SYNCHRO CRITIQUE ---
+                // On recalcule le ratio EXACT basé sur ce qu'Amplituda a VRAIMENT renvoyé
+                if (amplitudes.isNotEmpty() && totalDurationMs > 0) {
+                    msPerPoint = totalDurationMs.toDouble() / amplitudes.size.toDouble()
+                }
+
                 val maxVal = amplitudes.maxOrNull() ?: 1
                 val floats = FloatArray(amplitudes.size)
-                
                 for (i in amplitudes.indices) {
                     floats[i] = amplitudes[i].toFloat() / maxVal.toFloat() 
                 }
@@ -129,30 +126,24 @@ class EditorActivity : AppCompatActivity() {
                     binding.waveformView.initialize(floats.size.toLong())
                     binding.waveformView.appendData(floats)
                     
-                    // --- ZOOM AUTO : Remplir l'écran ---
                     binding.scroller.post {
                         val screenWidth = binding.scroller.width
                         if (screenWidth > 0 && floats.isNotEmpty()) {
-                            // On calcule le zoom pour que tout tienne
                             val fitZoom = screenWidth.toFloat() / floats.size.toFloat()
-                            // On applique, mais avec un min de 0.5 pour pas que ce soit illisible sur les très longs
                             applyZoom(fitZoom.coerceAtLeast(0.5f))
                         }
                     }
-                    
                     binding.progressBar.visibility = View.GONE
                 }
             }, { error ->
                 error.printStackTrace()
                 runOnUiThread { 
-                    Toast.makeText(this@EditorActivity, "Erreur chargement onde", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this@EditorActivity, "Erreur chargement", Toast.LENGTH_SHORT).show()
                     binding.progressBar.visibility = View.GONE
                 }
             })
         }
     }
-
-    // --- LOGIQUE COUPE VIRTUELLE ---
 
     private fun performVirtualCut() {
         val startIdx = binding.waveformView.selectionStart
@@ -161,88 +152,65 @@ class EditorActivity : AppCompatActivity() {
 
         stopAudio()
         
-        // 1. Calculer le temps RÉEL correspondant à ce qui est affiché
-        // C'est complexe car si on a déjà coupé avant, l'index visuel est décalé.
-        // Pour simplifier : On calcule le temps "visuel" et on projette sur le temps réel.
-        
-        // Temps visuel (ce que l'utilisateur voit)
-        val msPerPoint = 1000.0 / currentPointsPerSecond
+        // Calcul avec le ratio précis
         val visualStartMs = (startIdx * msPerPoint).toLong()
         val visualEndMs = (endIdx * msPerPoint).toLong()
         val durationCut = visualEndMs - visualStartMs
         
-        // On doit retrouver où ça tombe dans le fichier physique.
-        // On additionne la durée de toutes les coupes précédentes qui ont eu lieu AVANT ce point.
-        var offsetStart = 0L
-        // (Note: C'est une approximation pour l'UI, le vrai mapping parfait nécessiterait de reconstruire l'index complet
-        // mais pour l'usage courant c'est acceptable si on coupe du début à la fin).
-        
         val realStartMs = mapVisualToRealTime(visualStartMs)
         val realEndMs = realStartMs + durationCut
         
-        // 2. Ajouter à la liste des coupes (Mémoire)
         pendingCuts.add(Pair(realStartMs, realEndMs))
-        
-        // 3. Mettre à jour l'UI (On supprime l'onde visuellement)
         binding.waveformView.deleteRange(startIdx, endIdx)
         
-        // 4. Mettre à jour la durée affichée
-        val newTotalDuration = totalDurationMs - durationCut
-        // On ne change pas totalDurationMs (physique) mais on peut afficher une durée virtuelle
-        binding.txtDuration.text = formatTime(newTotalDuration) // Affichage seulement
+        // Recalculer l'affichage du temps total (virtuel)
+        // On soustrait la durée de toutes les coupes
+        var totalCutMs = 0L
+        pendingCuts.forEach { totalCutMs += (it.second - it.first) }
+        val displayDuration = totalDurationMs - totalCutMs
+        
+        binding.txtDuration.text = formatTime(displayDuration)
         
         Toast.makeText(this, "Coupe (en attente de sauvegarde)", Toast.LENGTH_SHORT).show()
     }
     
-    // Fonction helper pour retrouver le temps réel
     private fun mapVisualToRealTime(visualMs: Long): Long {
         var realMs = visualMs
-        // On parcourt les coupes triées
         val sortedCuts = pendingCuts.sortedBy { it.first }
-        
         for (cut in sortedCuts) {
+            // Si la coupe est avant le point que je cherche dans le référentiel réel
             if (cut.first < realMs) {
-                // Si une coupe a eu lieu avant mon point, mon point est décalé d'autant
-                val cutLen = cut.second - cut.first
-                realMs += cutLen
+                 // Attention : realMs avance, donc on peut "dépasser" d'autres coupes
+                 // Logique simplifiée : on ajoute la durée de la coupe
+                 realMs += (cut.second - cut.first)
             }
         }
         return realMs
     }
 
     private fun saveChangesAndExit() {
-        if (pendingCuts.isEmpty()) {
-            finish()
-            return
-        }
-        
+        if (pendingCuts.isEmpty()) { finish(); return }
         stopAudio()
         binding.progressBar.visibility = View.VISIBLE
         
         lifecycleScope.launch(Dispatchers.IO) {
             val tmpFile = File(currentFile.parent, "tmp_save_final.m4a")
-            
-            // Convertir les MS en SAMPLES pour AudioHelper
             val samplesCuts = ArrayList<Pair<Long, Long>>()
             val meta = AudioHelper.getAudioMetadata(currentFile) ?: return@launch
             
-            // Ratio Sample/MS précis
             val samplesPerMs = meta.sampleRate / 1000.0
-            
             for (cut in pendingCuts) {
                 val sStart = (cut.first * samplesPerMs).toLong()
                 val sEnd = (cut.second * samplesPerMs).toLong()
                 samplesCuts.add(Pair(sStart, sEnd))
             }
             
-            // Appliquer TOUTES les coupes d'un coup
             val success = AudioHelper.saveWithCuts(currentFile, tmpFile, samplesCuts)
-            
             withContext(Dispatchers.Main) {
                 if (success) {
                     currentFile.delete()
                     tmpFile.renameTo(currentFile)
-                    Toast.makeText(this@EditorActivity, "Enregistré avec succès", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this@EditorActivity, "Enregistré !", Toast.LENGTH_SHORT).show()
                     finish()
                 } else {
                     Toast.makeText(this@EditorActivity, "Erreur sauvegarde", Toast.LENGTH_SHORT).show()
@@ -258,27 +226,22 @@ class EditorActivity : AppCompatActivity() {
         lifecycleScope.launch(Dispatchers.IO) {
             val tmpFile = File(currentFile.parent, "tmp_norm.m4a")
             val success = AudioHelper.normalizeAudio(currentFile, tmpFile, 0, totalDurationMs, sampleRate, 0.98f) {}
-            
             withContext(Dispatchers.Main) {
                 if(success) {
                     currentFile.delete()
                     tmpFile.renameTo(currentFile)
-                    // Reset UI car le fichier a changé
                     pendingCuts.clear() 
                     binding.waveformView.clearData()
                     loadWaveformFast() 
                     Toast.makeText(this@EditorActivity, "Normalisé", Toast.LENGTH_SHORT).show()
                 } else {
                     binding.progressBar.visibility = View.GONE
-                    Toast.makeText(this@EditorActivity, "Erreur normalisation", Toast.LENGTH_SHORT).show()
                 }
             }
         }
     }
 
     private fun updateCurrentTimeDisplay(index: Int) {
-        // Affichage du temps "Visuel" (relatif à ce qui reste)
-        val msPerPoint = 1000.0 / currentPointsPerSecond
         val visualMs = (index * msPerPoint).toLong()
         binding.txtCurrentTime.text = formatTime(visualMs)
     }
@@ -303,12 +266,8 @@ class EditorActivity : AppCompatActivity() {
                 setDataSource(currentFile.absolutePath)
                 prepare()
                 
-                // Position de départ : On doit convertir l'index visuel en temps réel
                 val startIdx = if(binding.waveformView.selectionStart >= 0) binding.waveformView.selectionStart else binding.waveformView.playheadPos
-                val msPerPoint = 1000.0 / currentPointsPerSecond
                 val visualStartMs = (startIdx * msPerPoint).toLong()
-                
-                // Si on a des coupes, il faut sauter au bon endroit réel
                 val realStartMs = mapVisualToRealTime(visualStartMs)
                 
                 seekTo(realStartMs.toInt())
@@ -318,18 +277,13 @@ class EditorActivity : AppCompatActivity() {
             binding.btnPlay.setImageResource(R.drawable.ic_stop_read)
             
             playbackJob = lifecycleScope.launch {
-                // On trie les coupes pour la lecture
                 val sortedCuts = pendingCuts.sortedBy { it.first }
-                
                 while (mediaPlayer?.isPlaying == true) {
                     val currentRealMs = mediaPlayer?.currentPosition?.toLong() ?: 0L
                     
-                    // 1. LOGIQUE DE SAUT (SKIP)
                     var inCut = false
                     for (cut in sortedCuts) {
-                        // Si on est DANS une coupe
                         if (currentRealMs >= cut.first && currentRealMs < cut.second) {
-                            // On saute à la fin de la coupe
                             mediaPlayer?.seekTo(cut.second.toInt())
                             inCut = true
                             break
@@ -337,8 +291,7 @@ class EditorActivity : AppCompatActivity() {
                     }
                     
                     if (!inCut) {
-                        // 2. LOGIQUE D'AFFICHAGE CURSEUR
-                        // Convertir Real Time -> Visual Time (l'inverse de tout à l'heure)
+                        // Real -> Visual
                         var visualMs = currentRealMs
                         for (cut in sortedCuts) {
                             if (currentRealMs > cut.second) {
@@ -346,7 +299,7 @@ class EditorActivity : AppCompatActivity() {
                             }
                         }
                         
-                        val msPerPoint = 1000.0 / currentPointsPerSecond
+                        // CORRECTION SYNCHRO : Utilisation de msPerPoint (Double)
                         val currentIdx = (visualMs / msPerPoint).toInt()
                         
                         binding.waveformView.playheadPos = currentIdx
@@ -354,15 +307,12 @@ class EditorActivity : AppCompatActivity() {
                         runOnUiThread { updateCurrentTimeDisplay(currentIdx) }
                         autoScroll(currentIdx)
                         
-                        // Stop selection
-                        // Note : La sélection de fin est visuelle, donc on compare avec l'index visuel
                         if (binding.waveformView.selectionEnd > 0 && currentIdx >= binding.waveformView.selectionEnd) {
                             mediaPlayer?.pause()
                             break
                         }
                     }
-                    
-                    delay(40)
+                    delay(30)
                 }
                 if (mediaPlayer?.isPlaying != true) stopAudio()
             }
