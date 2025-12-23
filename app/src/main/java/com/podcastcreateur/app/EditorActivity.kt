@@ -99,6 +99,7 @@ class EditorActivity : AppCompatActivity() {
                 currentFile.absolutePath,
                 Compress.withParams(Compress.AVERAGE, requestPps)
             ).get({ result ->
+                if (isFinishing || isDestroyed) return@get 
                 val amplitudes = result.amplitudesAsList()
                 if (amplitudes.isNotEmpty() && totalDurationMs > 0) {
                     msPerPoint = totalDurationMs.toDouble() / amplitudes.size.toDouble()
@@ -124,6 +125,7 @@ class EditorActivity : AppCompatActivity() {
                     binding.progressBar.visibility = View.GONE
                 }
             }, { error ->
+                if (isFinishing || isDestroyed) return@get
                 error.printStackTrace()
                 runOnUiThread {
                     binding.progressBar.visibility = View.GONE
@@ -348,8 +350,9 @@ class EditorActivity : AppCompatActivity() {
         super.onDestroy()
         // ✅ Libération explicite des ressources lourdes
         try {
-            amplituda.cancel()
+            // amplituda.cancel()
         } catch (ignored: Exception) {}
         // Optionnel : binding.waveformView.clearPoints() si tu implémentes
+        stopAudio() 
     }
 }
