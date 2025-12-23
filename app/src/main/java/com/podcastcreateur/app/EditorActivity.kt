@@ -96,23 +96,42 @@ class EditorActivity : AppCompatActivity() {
             
             // GARDE LA LOGIQUE BASE : Meilleure résolution
             val durationSec = (totalDurationMs / 1000).coerceAtLeast(1)
+            // val requestPps = when {
+            //     durationSec < 10 -> 5000
+            //     durationSec < 60 -> 2000 
+            //     durationSec < 300 -> 400
+            //     durationSec < 900 -> 100
+            //     else -> 50 
+            // }
             val requestPps = when {
-                durationSec < 10 -> 5000
-                durationSec < 60 -> 2000 
-                durationSec < 300 -> 400
-                durationSec < 900 -> 100
-                else -> 50 
+                durationSec < 10 -> 200
+                durationSec < 60 -> 100 
+                durationSec < 300 -> 80
+                durationSec < 900 -> 50
+                else -> 30 
             }
 
             amplituda.processAudio(
                 currentFile.absolutePath, 
                 Compress.withParams(Compress.AVERAGE, requestPps) 
             ).get({ result ->
+               if (totalDurationMs <= 0) {
+                    try {
+                        // Utilisation de l'API demandée
+                        totalDurationMs = result.getAudioDuration(com.linc.amplituda.AmplitudaResult.DurationUnit.MILLIS)
+                    } catch (e: Exception) {
+                        e.printStackTrace() // Si même Amplituda échoue
+                    }
+                }
                 val amplitudes = result.amplitudesAsList()
                 
                 if (amplitudes.isNotEmpty() && totalDurationMs > 0) {
                     msPerPoint = totalDurationMs.toDouble() / amplitudes.size.toDouble()
                 }
+                } else {
+                    // Cas désespéré : on met une valeur par défaut pour éviter crash division par 0
+                    msPerPoint = 100.0 
+                }                
 
                 val maxVal = amplitudes.maxOrNull() ?: 1
                 val floats = FloatArray(amplitudes.size)
@@ -121,6 +140,7 @@ class EditorActivity : AppCompatActivity() {
                 }
 
                 runOnUiThread {
+                     if (isDestroyed || isFinishing) return@runOnUiThread
                     binding.txtDuration.text = formatTime(totalDurationMs)
                     binding.waveformView.initialize(floats.size.toLong())
                     binding.waveformView.appendData(floats)
@@ -135,7 +155,9 @@ class EditorActivity : AppCompatActivity() {
                     binding.progressBar.visibility = View.GONE
                 }
             }, { error ->
-                error.printStackTrace()
+                
+                android.util.Log.e("Amplituda", "Erreur: ${error.message}", error)
+                // error.printStackTrace()
                 runOnUiThread { 
                     binding.progressBar.visibility = View.GONE
                     if (binding.waveformView.getPointsCount() == 0) {
