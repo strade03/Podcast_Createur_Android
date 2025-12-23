@@ -143,10 +143,10 @@ class ProjectActivity : AppCompatActivity() {
         container.addView(input)
 
         val dialog = AlertDialog.Builder(this)
-            .setTitle("Ajouter une chronique")
+            .setTitle(getString(R.string.dialog_new_clip_title))
             .setView(container)
-            .setPositiveButton("Ajouter", null)
-            .setNegativeButton("Annuler", null)
+            .setPositiveButton(getString(R.string.btn_new_clip), null)
+            .setNegativeButton(getString(R.string.btn_cancel), null)
             .create()
         dialog.window?.setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_STATE_VISIBLE)
         dialog.show()
@@ -158,7 +158,7 @@ class ProjectActivity : AppCompatActivity() {
             val safeName = rawName.replace(Regex("[^\\p{L}0-9 _-]"), "")
             
             if (chronicleList.any { it.name.equals(safeName, ignoreCase = true) }) {
-                Toast.makeText(this, "Une chronique porte déjà  ce nom", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this,  getString(R.string.clip_exists), Toast.LENGTH_SHORT).show()
             } else {
                 val prefix = String.format("%03d_", chronicleList.size)
                 val txtFile = File(projectDir, "$prefix$safeName.txt")
@@ -177,14 +177,34 @@ class ProjectActivity : AppCompatActivity() {
             if (item.prefix != newPrefix) {
                 val oldTxt = item.scriptFile
                 val newTxt = File(projectDir, "$newKey.txt")
-                if(oldTxt.exists()) tempRenames.add(oldTxt to newTxt)
+                // ✅ Vérifier collision avant rename
+                if (oldTxt.exists() && !newTxt.exists()) {
+                    tempRenames.add(oldTxt to newTxt)
+                }
                 item.audioFile?.let { oldAudio ->
-                    val newAudio = File(projectDir, "$newKey." + oldAudio.extension)
-                    if(oldAudio.exists()) tempRenames.add(oldAudio to newAudio)
+                    val newAudio = File(projectDir, "$newKey.${oldAudio.extension}")
+                    if (oldAudio.exists() && !newAudio.exists()) {
+                        tempRenames.add(oldAudio to newAudio)
+                    }
                 }
             }
         }
-        tempRenames.forEach { (old, new) -> old.renameTo(new) }
+        // ✅ Renommer en 2 passes : d'abord vers .tmp, puis vers final (optionnel, mais très robuste)
+        // Ici version simple mais sûre (on vérifie absence avant)
+        
+        tempRenames.forEach { (old, new) ->
+            if (!new.parentFile.exists()) new.parentFile.mkdirs()
+            if (!old.renameTo(new)) {
+                // Log ou Toast
+                val displayName = new.name.take(50)
+                val safeName = displayName.replace(Regex("[\u0000-\u001F\u007F]"), "")
+
+                runOnUiThread {
+                    Toast.makeText(this,getString(R.string.error_rename, safeName), Toast.LENGTH_SHORT).show()
+                    // Toast.makeText(this,getString(R.string.error_rename, new.toString()), Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
         refreshList()
     }
 
@@ -236,7 +256,7 @@ class ProjectActivity : AppCompatActivity() {
             currentPlayingFile = file
             adapter.notifyDataSetChanged() // Met à  jour les icônes
         } catch (e: Exception) {
-            Toast.makeText(this, "Erreur lecture", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this,  getString(R.string.error_read_file), Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -257,13 +277,13 @@ class ProjectActivity : AppCompatActivity() {
        private fun performMerge() {
          val filesToMerge = chronicleList.mapNotNull { it.audioFile }
          if (filesToMerge.isEmpty()) {
-             Toast.makeText(this, "Aucun audio à  exporter", Toast.LENGTH_SHORT).show()
+             Toast.makeText(this,  getString(R.string.export_no_audio), Toast.LENGTH_SHORT).show()
              return
          }
          
          val progressDialog = AlertDialog.Builder(this)
-             .setTitle("Export en cours...")
-             .setMessage("Veuillez patienter pendant la fusion.")
+             .setTitle(getString(R.string.export_in_progress))
+             .setMessage(getString(R.string.export_wait))
              .setCancelable(false)
              .create()
          progressDialog.show()
@@ -300,12 +320,12 @@ class ProjectActivity : AppCompatActivity() {
                  progressDialog.dismiss()
                  if (success) {
                      AlertDialog.Builder(this)
-                        .setTitle("Export terminé !")
-                        .setMessage("Fichier sauvegardé :\nMusic/PodcastCreateur/$outputName")
-                        .setPositiveButton("OK", null)
+                        .setTitle(getString(R.string.export_success_title))
+                        .setMessage(getString(R.string.export_success_msg))
+                        .setPositiveButton(getString(R.string.export_success_msg), null)
                         .show()
                  } else {
-                     Toast.makeText(this, "Erreur lors de l'export", Toast.LENGTH_LONG).show()
+                     Toast.makeText(this, getString(R.string.export_error), Toast.LENGTH_LONG).show()
                  }
              }
          }.start()
@@ -347,9 +367,9 @@ class ProjectActivity : AppCompatActivity() {
         container.addView(input)
 
         AlertDialog.Builder(this)
-            .setTitle("Renommer la chronique")
+            .setTitle(getString(R.string.rename_clip))
             .setView(container)
-            .setPositiveButton("Renommer") { _, _ ->
+            .setPositiveButton(getString(R.string.btn_rename)) { _, _ ->
                 val newName = input.text.toString().trim().replace(Regex("[^\\p{L}0-9 _-]"), "")
                 if (newName.isNotEmpty() && newName != item.name) {
                     val oldBase = item.prefix + item.name
@@ -359,16 +379,16 @@ class ProjectActivity : AppCompatActivity() {
                     refreshList()
                 }
             }
-            .setNegativeButton("Annuler", null).show()
+            .setNegativeButton(getString(R.string.btn_cancel), null).show()
     }
     
     fun onDelete(item: Chronicle) {
-        AlertDialog.Builder(this).setTitle("Supprimer ?").setMessage(item.name).setPositiveButton("Oui") { _, _ ->
+        AlertDialog.Builder(this).setTitle(getString(R.string.confirm_delete_clip)).setMessage(item.name).setPositiveButton( getString(R.string.btn_yes)) { _, _ ->
             item.scriptFile.delete()
             item.audioFile?.delete()
             refreshList()
             saveOrderOnDisk() 
-        }.setNegativeButton("Non", null).show()
+        }.setNegativeButton(getString(R.string.btn_no), null).show()
     }
 }
 

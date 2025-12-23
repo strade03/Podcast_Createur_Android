@@ -1,3 +1,70 @@
 <resources>
-<string name="app_name">Podcast Createur</string>
+    <string name="app_name">Podcast Createur</string>
+
+    <!-- HomeActivity -->
+    <string name="title_my_projects">Mes Émissions</string>
+    <string name="btn_new_project">+ Nouvelle Émission</string>
+    <string name="dialog_new_project_title">Nouvelle émission</string>
+    <string name="dialog_new_project_hint">Nom de l\'émission</string>
+    <string name="btn_create">Créer</string>
+    <string name="btn_cancel">Annuler</string>
+    <string name="error_project_exists">Ce nom existe déjà</string>
+    <string name="error_project_name_empty">Le nom ne peut pas être vide</string>
+    <string name="project_created">Émission créée</string>
+    <string name="project_deleted">Émission supprimée</string>
+    <string name="confirm_delete_project">Supprimer l\'émission ?</string>
+    <string name="confirm_delete_project_msg">ATTENTION : L\'émission \'%1$s\' et tous ses fichiers seront supprimés.</string>
+
+    <!-- ProjectActivity -->
+    <string name="project_title">Émission</string>
+    <string name="btn_record_new">Enregistrer</string>
+    <string name="btn_import_file">Importer</string>
+    <string name="btn_new_clip">Ajouter</string>
+    <string name="btn_merge_project">Fusionner</string>
+    <string name="hint_drag_to_reorder">Maintenez appuyé pour déplacer l\'ordre</string>
+    <string name="dialog_new_clip_title">Ajouter une chronique</string>
+    <string name="dialog_new_clip_hint">Titre de la chronique</string>
+    <string name="clip_exists">Une chronique porte déjà ce nom</string>
+    <string name="imported_success">Importé</string>
+    <string name="export_no_audio">Aucun audio à exporter</string>
+    <string name="export_in_progress">Export en cours…</string>
+    <string name="export_wait">Veuillez patienter pendant la fusion.</string>
+    <string name="export_success_title">Export terminé !</string>
+    <string name="export_success_msg">Fichier sauvegardé :\nMusic/PodcastCreateur/%1$s</string>
+    <string name="export_success_ok">Ok</string>
+    <string name="export_error">Erreur lors de l\'export</string>
+    <string name="rename_clip">Renommer la chronique</string>
+    <string name="btn_rename">Renommer</string>
+    <string name="confirm_delete_clip">Supprimer ?</string>
+    <string name="error_rename">Erreur renommage : %1$s</string>
+
+    <!-- RecorderActivity -->
+    <string name="permission_missing">Permission manquante</string>
+    <string name="recording_finished">Enregistrement terminé</string>
+
+    <!-- EditorActivity -->
+    <string name="error_file_read">Erreur lecture fichier</string>
+    <string name="error_audio_play">Erreur lecture</string>
+    <string name="error_save">Erreur sauvegarde</string>
+    <string name="saved_success">Enregistré !</string>
+    <string name="confirm_re_record">Refaire ?</string>
+    <string name="btn_yes">Oui</string>
+    <string name="btn_no">Non</string>
+    <string name="normalization_ready">Normalisation prête</string>
+    <string name="audio_too_quiet">Audio trop faible</string>
+
+    <!-- ScriptEditorActivity -->
+    <string name="title_script_editor">Édition du script</string>
+    <string name="btn_import_text">Importer TXT</string>
+    <string name="hint_script">Écrivez votre texte ici…</string>
+    <string name="btn_save_script">Sauvegarder</string>
+    <string name="script_saved">Script sauvegardé</string>
+    <string name="error_read_file">Erreur de lecture</string>
+    <string name="text_imported">Texte importé</string>
+
+    <!-- Status -->
+    <string name="script_ok">Script OK</string>
+    <string name="script_empty">Script vide</string>
+    <string name="audio_ok">Audio OK</string>
+    <string name="no_audio">Pas d\'audio</string>
 </resources>

@@ -24,10 +24,10 @@ class ScriptEditorActivity : AppCompatActivity() {
                     val text = inputStream.readBytes().toString(Charset.defaultCharset())
                     // On remplace le texte existant (ou inputScript.append(text) si tu préféres)
                     inputScript.setText(text)
-                    Toast.makeText(this, "Texte importé", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this,  getString(R.string.text_imported), Toast.LENGTH_SHORT).show()
                 }
             } catch (e: Exception) {
-                Toast.makeText(this, "Erreur de lecture", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this,  getString(R.string.error_read_file), Toast.LENGTH_SHORT).show()
             }
         }
     }
@@ -57,7 +57,7 @@ class ScriptEditorActivity : AppCompatActivity() {
         // Action Sauvegarder
         btnSave.setOnClickListener {
             scriptFile.writeText(inputScript.text.toString())
-            Toast.makeText(this, "Script sauvegardé", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, getString(R.string.script_saved), Toast.LENGTH_SHORT).show()
             finish()
         }
     }

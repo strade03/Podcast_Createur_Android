@@ -92,10 +92,10 @@ class HomeActivity : AppCompatActivity() {
         input.layoutParams = params
         container.addView(input)
         val dialog = AlertDialog.Builder(this)
-            .setTitle("Nouvelle émission")
+            .setTitle( getString(R.string.btn_new_project))
             .setView(container)
-            .setPositiveButton("Créer", null) 
-            .setNegativeButton("Annuler", null)
+            .setPositiveButton(getString(R.string.btn_create), null) 
+            .setNegativeButton(getString(R.string.btn_cancel), null)
             .create()
         dialog.window?.setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_STATE_VISIBLE)
         dialog.show()
@@ -106,17 +106,18 @@ class HomeActivity : AppCompatActivity() {
                 val safeName = name.replace(Regex("[^\\p{L}0-9 _-]"), "") 
                 val projDir = File(rootDir, safeName)
                 if (projDir.exists()) {
-                    Toast.makeText(this, "Ce nom existe déjà", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this, getString(R.string.error_project_exists), Toast.LENGTH_SHORT).show()
                 } else {
                     projDir.mkdirs()
                     refreshList()
                     dialog.dismiss() 
                     val intent = Intent(this, ProjectActivity::class.java)
+                    Toast.makeText(this, getString(R.string.project_created), Toast.LENGTH_SHORT).show()
                     intent.putExtra("PROJECT_NAME", safeName)
                     startActivity(intent)
                 }
             } else {
-                Toast.makeText(this, "Le nom ne peut pas être vide", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, getString(R.string.error_project_name_empty), Toast.LENGTH_SHORT).show()
             }
         }
     }
@@ -130,7 +131,7 @@ class HomeActivity : AppCompatActivity() {
             .setPositiveButton("Supprimer") { _, _ ->
                 dir.deleteRecursively()
                 refreshList()
-                Toast.makeText(this, "Émission supprimée", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, getString(R.string.project_deleted), Toast.LENGTH_SHORT).show()
             }
             .setNegativeButton("Annuler", null)
             .show()

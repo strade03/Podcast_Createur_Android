@@ -46,7 +46,7 @@ class RecorderActivity : AppCompatActivity() {
 
     private fun startRecording() {
         if (ActivityCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
-            Toast.makeText(this, "Permission manquante", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, getString(R.string.permission_missing), Toast.LENGTH_SHORT).show()
             return
         }
 
@@ -79,7 +79,7 @@ class RecorderActivity : AppCompatActivity() {
         binding.chronometer.stop()
         binding.btnRecordToggle.setImageResource(R.drawable.ic_record)
         
-        Toast.makeText(this, "Enregistrement terminé", Toast.LENGTH_SHORT).show()
+        Toast.makeText(this, getString(R.string.recording_finished), Toast.LENGTH_SHORT).show()
         
         // MODIFICATION : Ouvrir l'éditeur directement
         val intent = Intent(this, EditorActivity::class.java)
