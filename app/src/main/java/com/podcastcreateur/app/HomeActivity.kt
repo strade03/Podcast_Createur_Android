@@ -8,11 +8,7 @@ import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
-import android.widget.Button
-import android.widget.EditText
-import android.widget.ImageButton
-import android.widget.TextView
-import android.widget.Toast
+import android.widget.*
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
@@ -77,9 +73,9 @@ class HomeActivity : AppCompatActivity() {
 
     private fun showNewProjectDialog() {
         val input = EditText(this)
-        input.setText("Mon émission") // ✅ Maintenant correctement encodé
+        input.setText(getString(R.string.dialog_new_project_title)) // Usage string
         input.selectAll()
-        input.hint = "Nom de l'émission"
+        input.hint = getString(R.string.dialog_new_project_hint)
         input.setTextColor(Color.BLACK) 
         input.setHintTextColor(Color.GRAY)
         
@@ -92,7 +88,7 @@ class HomeActivity : AppCompatActivity() {
         input.layoutParams = params
         container.addView(input)
         val dialog = AlertDialog.Builder(this)
-            .setTitle( getString(R.string.btn_new_project))
+            .setTitle(getString(R.string.btn_new_project))
             .setView(container)
             .setPositiveButton(getString(R.string.btn_create), null) 
             .setNegativeButton(getString(R.string.btn_cancel), null)
@@ -112,9 +108,9 @@ class HomeActivity : AppCompatActivity() {
                     refreshList()
                     dialog.dismiss() 
                     val intent = Intent(this, ProjectActivity::class.java)
-                    Toast.makeText(this, getString(R.string.project_created), Toast.LENGTH_SHORT).show()
                     intent.putExtra("PROJECT_NAME", safeName)
                     startActivity(intent)
+                    Toast.makeText(this, getString(R.string.project_created), Toast.LENGTH_SHORT).show()
                 }
             } else {
                 Toast.makeText(this, getString(R.string.error_project_name_empty), Toast.LENGTH_SHORT).show()
@@ -122,18 +118,16 @@ class HomeActivity : AppCompatActivity() {
         }
     }
 
-
-
     private fun showDeleteDialog(dir: File) {
         AlertDialog.Builder(this)
-                .setTitle(getString(R.string.confirm_delete_project))
-                .setMessage(getString(R.string.confirm_delete_project_msg, dir.name))
-                .setPositiveButton(getString(R.string.btn_yes))  { _, _ ->
+            .setTitle(getString(R.string.confirm_delete_project))
+            .setMessage(getString(R.string.confirm_delete_project_msg, dir.name))
+            .setPositiveButton(getString(R.string.btn_yes)) { _, _ ->
                 dir.deleteRecursively()
                 refreshList()
                 Toast.makeText(this, getString(R.string.project_deleted), Toast.LENGTH_SHORT).show()
             }
-            .setNegativeButton("Annuler", null)
+            .setNegativeButton(getString(R.string.btn_cancel), null)
             .show()
     }
 

@@ -81,7 +81,6 @@ class RecorderActivity : AppCompatActivity() {
         
         Toast.makeText(this, getString(R.string.recording_finished), Toast.LENGTH_SHORT).show()
         
-        // MODIFICATION : Ouvrir l'éditeur directement
         val intent = Intent(this, EditorActivity::class.java)
         intent.putExtra("FILE_PATH", outputFile.absolutePath)
         startActivity(intent)
