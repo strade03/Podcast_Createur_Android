@@ -12,9 +12,15 @@ import androidx.lifecycle.lifecycleScope
 import com.podcastcreateur.app.databinding.ActivityEditorBinding
 import com.linc.amplituda.Amplituda
 import com.linc.amplituda.Compress
-import kotlinx.coroutines.*
 import java.io.File
 import kotlin.math.abs
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class EditorActivity : AppCompatActivity() {
     private lateinit var binding: ActivityEditorBinding
@@ -308,7 +314,7 @@ class EditorActivity : AppCompatActivity() {
 
     private fun autoScroll(sampleIdx: Int) {
         val pointWidth = binding.waveformView.pointWidth
-        val playheadPixel = (sampleIdx * pointWidth).toInt()
+        val playheadPixel = (sampleIdx.toFloat() * pointWidth).toInt()
         val scrollerWidth = binding.scroller.width
         val margin = scrollerWidth / 4
         val currentScroll = binding.scroller.scrollX
