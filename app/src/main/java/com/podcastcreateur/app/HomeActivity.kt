@@ -126,9 +126,9 @@ class HomeActivity : AppCompatActivity() {
 
     private fun showDeleteDialog(dir: File) {
         AlertDialog.Builder(this)
-            .setTitle("Supprimer l'émission ?")
-            .setMessage("ATTENTION : L'émission '${dir.name}' et tous ses fichiers seront supprimés.")
-            .setPositiveButton("Supprimer") { _, _ ->
+                .setTitle(getString(R.string.confirm_delete_project))
+                .setMessage(getString(R.string.confirm_delete_project_msg, dir.name))
+                .setPositiveButton(getString(R.string.btn_yes))  { _, _ ->
                 dir.deleteRecursively()
                 refreshList()
                 Toast.makeText(this, getString(R.string.project_deleted), Toast.LENGTH_SHORT).show()

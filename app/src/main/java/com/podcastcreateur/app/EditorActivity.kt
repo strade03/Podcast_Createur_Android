@@ -258,7 +258,8 @@ class EditorActivity : AppCompatActivity() {
                 mediaPlayer = MediaPlayer()
                 mediaPlayer!!.setDataSource(currentFile.absolutePath)
                 // Calculer offset en échantillons
-                val visualIdx = binding.waveformView.getPlayheadIndex()
+                // val visualIdx = binding.waveformView.getPlayheadIndex()
+                val visualIdx = binding.waveformView.playheadPos
                 val visualMs = (visualIdx * msPerPoint).toLong()
                 val realMs = mapVisualToRealTime(visualMs)
                 mediaPlayer!!.setOnPreparedListener {

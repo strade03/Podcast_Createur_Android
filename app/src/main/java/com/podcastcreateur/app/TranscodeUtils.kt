@@ -175,7 +175,9 @@ object TranscodeUtils {
             val inIdx = encoder.dequeueInputBuffer(2000)
             if (inIdx >= 0) {
                 val buf = encoder.getInputBuffer(inIdx)!!
-                val toWrite = min(buf.remaining(), data.size - offset)
+                // val toWrite = min(buf.remaining(), data.size - offset)
+                val toWrite = (data.size - offset).coerceAtMost(buf.remaining())
+
                 buf.put(data, offset, toWrite)
                 encoder.queueInputBuffer(inIdx, 0, toWrite, System.nanoTime() / 1000, 0)
                 offset += toWrite

@@ -321,7 +321,8 @@ class ProjectActivity : AppCompatActivity() {
                  if (success) {
                      AlertDialog.Builder(this)
                         .setTitle(getString(R.string.export_success_title))
-                        .setMessage(getString(R.string.export_success_msg))
+                        // .setMessage(getString(R.string.export_success_msg))
+                        .setMessage(getString(R.string.export_success_msg, outputName))
                         .setPositiveButton(getString(R.string.export_success_msg), null)
                         .show()
                  } else {
