@@ -8,6 +8,8 @@ import android.util.AttributeSet
 import android.view.GestureDetector
 import android.view.MotionEvent
 import android.view.View
+import kotlin.math.max
+import kotlin.math.min
 
 class WaveformView @JvmOverloads constructor(
     context: Context, attrs: AttributeSet? = null
@@ -56,7 +58,10 @@ class WaveformView @JvmOverloads constructor(
         override fun onDown(e: MotionEvent): Boolean = true 
 
         override fun onSingleTapUp(e: MotionEvent): Boolean {
-            playheadPos = pixelToIndex(e.x)
+            // Clic simple : on place le curseur, on annule la sélection
+            // On clamp pour ne pas cliquer hors limites
+            val idx = pixelToIndex(e.x).coerceIn(0, (points.size - 1).coerceAtLeast(0))
+            playheadPos = idx
             selectionStart = -1
             selectionEnd = -1
             onPositionChanged?.invoke(playheadPos)
@@ -66,7 +71,8 @@ class WaveformView @JvmOverloads constructor(
 
         override fun onLongPress(e: MotionEvent) {
             isDraggingSelection = true
-            val s = pixelToIndex(e.x)
+            // Début de sélection : On clamp immédiatement
+            val s = pixelToIndex(e.x).coerceIn(0, (points.size - 1).coerceAtLeast(0))
             selectionStart = s
             selectionEnd = s
             playheadPos = s
@@ -100,13 +106,9 @@ class WaveformView @JvmOverloads constructor(
     fun deleteRange(start: Int, end: Int) {
         if (start < 0 || end > points.size || start >= end) return
         val count = end - start
-        // On supprime en partant de la fin du range pour éviter les décalages d'index
-        // Mais ArrayList.removeAt décale tout seul, on fait simple :
-        // Pour être efficace sur de gros tableaux, subList().clear() est mieux
         try {
             points.subList(start, end).clear()
         } catch (e: Exception) {
-            // Fallback manuel si subList pose souci
              for (i in 0 until count) points.removeAt(start)
         }
         
@@ -141,21 +143,16 @@ class WaveformView @JvmOverloads constructor(
         val h = height.toFloat()
         val centerY = h / 2f
         
-        // --- 1. Dessin de la zone vide à la fin ---
+        // 1. Zone vide
         val audioEndX = points.size * zoomFactor
         if (audioEndX < width) {
             canvas.drawRect(audioEndX, 0f, width.toFloat(), h, outOfBoundsPaint)
         }
 
-        // --- 2. Ligne centrale ---
+        // 2. Ligne centrale
         canvas.drawLine(0f, centerY, width.toFloat(), centerY, centerLinePaint)
 
-        // --- 3. Dessin de l'onde ---
-        // CORRECTION MAJEURE : On dessine tout, on laisse le GPU gérer le clipping.
-        // C'est ce qui règle le bug de l'onde invisible au scroll.
-        // On peut juste optimiser légèrement en ne dessinant pas ce qui est hors des bornes du Canvas actuel
-        // (getClipBounds retourne la zone que le système demande de redessiner)
-        
+        // 3. Onde (Optimisée par clipBounds)
         val clipBounds = canvas.clipBounds
         val startIdx = pixelToIndex(clipBounds.left.toFloat()).coerceAtLeast(0)
         val endIdx = pixelToIndex(clipBounds.right.toFloat()).coerceAtMost(points.size - 1)
@@ -167,14 +164,22 @@ class WaveformView @JvmOverloads constructor(
             canvas.drawLine(x, centerY - barHeight, x, centerY + barHeight, paint)
         }
 
-        // --- 4. Sélection ---
-        if (selectionStart >= 0 && selectionEnd > selectionStart) {
-            val x1 = sampleToPixel(selectionStart)
-            val x2 = sampleToPixel(selectionEnd)
-            canvas.drawRect(x1, 0f, x2, h, selectionPaint)
+        // 4. SÉLECTION (CORRECTION GAUCHE/DROITE)
+        // On vérifie juste si start est défini. End peut être n'importe où.
+        if (selectionStart >= 0) {
+            // On calcule le min et le max pour dessiner le rectangle correctement
+            // peu importe si on tire vers la gauche ou la droite
+            val drawStart = min(selectionStart, selectionEnd)
+            val drawEnd = max(selectionStart, selectionEnd)
+            
+            if (drawEnd > drawStart) {
+                val x1 = sampleToPixel(drawStart)
+                val x2 = sampleToPixel(drawEnd)
+                canvas.drawRect(x1, 0f, x2, h, selectionPaint)
+            }
         }
 
-        // --- 5. Curseur ---
+        // 5. Curseur
         val px = sampleToPixel(playheadPos)
         canvas.drawLine(px, 0f, px, h, playheadPaint)
     }
@@ -190,12 +195,16 @@ class WaveformView @JvmOverloads constructor(
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
         if (gestureDetector.onTouchEvent(event)) return true
+        
         when(event.action) {
             MotionEvent.ACTION_MOVE -> {
                 if (isDraggingSelection) {
-                    val s = pixelToIndex(event.x)
+                    // CORRECTION LIMITES : On empêche d'aller au-delà de la fin
+                    val maxIndex = (points.size - 1).coerceAtLeast(0)
+                    val s = pixelToIndex(event.x).coerceIn(0, maxIndex)
+                    
                     selectionEnd = s
-                    invalidate()
+                    invalidate() // Redessine immédiatement (le onDraw gère gauche/droite)
                     return true
                 }
                 return false
@@ -204,10 +213,17 @@ class WaveformView @JvmOverloads constructor(
                 if (isDraggingSelection) {
                     isDraggingSelection = false
                     parent?.requestDisallowInterceptTouchEvent(false)
+                    
+                    // Une fois lâché, on remet start < end pour la logique métier
                     if(selectionStart > selectionEnd) {
                         val t = selectionStart; selectionStart = selectionEnd; selectionEnd = t
                     }
-                    if (selectionStart >= 0 && selectionStart != selectionEnd) {
+                    
+                    // Si clic sur place (pas de sélection), on place le curseur
+                    if (selectionStart == selectionEnd) {
+                        selectionStart = -1
+                        selectionEnd = -1
+                    } else if (selectionStart >= 0) {
                         playheadPos = selectionStart
                         onPositionChanged?.invoke(playheadPos)
                     }

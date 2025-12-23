@@ -4,7 +4,7 @@ import android.content.Intent
 import android.media.MediaPlayer
 import android.os.Bundle
 import android.view.View
-import android.view.WindowManager // IMPORT AJOUTÉ
+import android.view.WindowManager
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
@@ -34,15 +34,12 @@ class EditorActivity : AppCompatActivity() {
 
     private val pendingCuts = ArrayList<Pair<Long, Long>>() 
     
-    // NOUVEAU : Gain virtuel (1.0 = pas de changement)
     private var pendingGain = 1.0f
-    
     private var msPerPoint: Double = 20.0 
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         
-        // --- 1. GARDER ECRAN ALLUMÉ ---
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         
         binding = ActivityEditorBinding.inflate(layoutInflater)
@@ -65,7 +62,7 @@ class EditorActivity : AppCompatActivity() {
         }
         
         binding.btnCut.setOnClickListener { performVirtualCut() }
-        binding.btnNormalize.setOnClickListener { prepareVirtualNormalization() } // Changement ici
+        binding.btnNormalize.setOnClickListener { prepareVirtualNormalization() } 
         binding.btnSave.setOnClickListener { saveChangesAndExit() }
         
         binding.btnZoomIn.setOnClickListener { applyZoom(currentZoom * 1.5f) }
@@ -100,10 +97,13 @@ class EditorActivity : AppCompatActivity() {
             }
             
             val durationSec = (totalDurationMs / 1000).coerceAtLeast(1)
+            
+            // --- CORRECTION RÉSOLUTION ---
+            // On augmente drastiquement la résolution pour les fichiers courts
             val requestPps = when {
-                durationSec < 60 -> 400
-                durationSec < 300 -> 200
-                durationSec < 900 -> 100
+                durationSec < 60 -> 1000  // < 1min : 1000 points/sec (Très haute résolution)
+                durationSec < 300 -> 400  // < 5min : 400 points/sec
+                durationSec < 900 -> 100  // < 15min : 100 points/sec
                 else -> 50 
             }
 
@@ -184,9 +184,6 @@ class EditorActivity : AppCompatActivity() {
         return realMs
     }
 
-    // --- 2. OPTIMISATION NORMALISATION (VIRTUELLE) ---
-    // On ne réécrit pas le fichier. On calcule juste le gain nécessaire.
-    // L'application réelle se fera dans saveChangesAndExit.
     private fun prepareVirtualNormalization() {
         stopAudio()
         binding.progressBar.visibility = View.VISIBLE
@@ -197,18 +194,17 @@ class EditorActivity : AppCompatActivity() {
             withContext(Dispatchers.Main) {
                 binding.progressBar.visibility = View.GONE
                 if (peak > 0.01f) {
-                    val target = 0.98f // Cible standard
+                    val target = 0.98f
                     pendingGain = target / peak
-                    Toast.makeText(this@EditorActivity, "Normalisation prête (sera appliquée à la sauvegarde)", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this@EditorActivity, "Normalisation prête", Toast.LENGTH_SHORT).show()
                 } else {
-                    Toast.makeText(this@EditorActivity, "Audio trop faible ou vide", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this@EditorActivity, "Audio trop faible", Toast.LENGTH_SHORT).show()
                 }
             }
         }
     }
 
     private fun saveChangesAndExit() {
-        // Même si pas de coupes, on sauvegarde si y'a un gain à appliquer
         if (pendingCuts.isEmpty() && pendingGain == 1.0f) { finish(); return }
         
         stopAudio()
@@ -227,7 +223,6 @@ class EditorActivity : AppCompatActivity() {
                 samplesCuts.add(Pair(sStart, sEnd))
             }
             
-            // On appelle la nouvelle fonction qui fait TOUT en une seule passe
             val success = AudioHelper.saveWithCutsAndGain(currentFile, tmpFile, samplesCuts, pendingGain)
             
             withContext(Dispatchers.Main) {
@@ -242,6 +237,12 @@ class EditorActivity : AppCompatActivity() {
                 }
             }
         }
+    }
+
+    private fun normalizeSelectionStreaming() {
+        // Ancienne méthode, inutilisée si on passe par la méthode virtuelle
+        // Gardée pour compatibilité si besoin de réactiver le bouton direct
+        prepareVirtualNormalization()
     }
 
     private fun updateCurrentTimeDisplay(index: Int) {
@@ -267,16 +268,10 @@ class EditorActivity : AppCompatActivity() {
         try {
             mediaPlayer = MediaPlayer().apply {
                 setDataSource(currentFile.absolutePath)
-                
-                // Appliquer le volume (gain) en prévisualisation si possible
-                // MediaPlayer ne peut pas amplifier au-dessus de 1.0 facilement sans API level élevé ou DynamicsProcessing
-                // On met juste au max si gain > 1, sinon on réduit.
-                // C'est juste une prévisualisation approximative du volume.
                 if (pendingGain != 1.0f) {
                     val vol = pendingGain.coerceAtMost(1.0f)
                     setVolume(vol, vol)
                 }
-                
                 prepare()
                 
                 val startIdx = if(binding.waveformView.selectionStart >= 0) binding.waveformView.selectionStart else binding.waveformView.playheadPos
@@ -318,7 +313,10 @@ class EditorActivity : AppCompatActivity() {
                         runOnUiThread { updateCurrentTimeDisplay(currentIdx) }
                         autoScroll(currentIdx)
                         
-                        if (binding.waveformView.selectionEnd > 0 && currentIdx >= binding.waveformView.selectionEnd) {
+                        // Stop if selection end reached (and it's a valid selection L-R)
+                        if (binding.waveformView.selectionStart >= 0 && 
+                            binding.waveformView.selectionEnd > binding.waveformView.selectionStart && 
+                            currentIdx >= binding.waveformView.selectionEnd) {
                             mediaPlayer?.pause()
                             break
                         }
