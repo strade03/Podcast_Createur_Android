@@ -25,6 +25,8 @@ class WaveformView @JvmOverloads constructor(
     
     var onPositionChanged: ((Int) -> Unit)? = null
   
+    val pointWidth: Float get() = zoomFactor
+    
     private val paint = Paint().apply {
         color = Color.parseColor("#3F51B5")
         strokeWidth = 2f
@@ -82,6 +84,12 @@ class WaveformView @JvmOverloads constructor(
             invalidate()
         }
     })
+
+fun setPlayhead(index: Int) {
+    playheadPos = index.coerceIn(0, points.size - 1)
+    invalidate()
+}
+fun getPlayheadIndex(): Int = playheadPos
 
     fun initialize(totalPoints: Long) {
         this.totalPointsEstimate = totalPoints

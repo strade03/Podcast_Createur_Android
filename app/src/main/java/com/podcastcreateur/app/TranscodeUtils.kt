@@ -9,6 +9,7 @@ import java.io.File
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import kotlin.math.min
+import android.media.MediaCodecInfo
 
 object TranscodeUtils {
     private const val BIT_RATE = 128000
